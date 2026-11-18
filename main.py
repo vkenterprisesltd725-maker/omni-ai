@@ -52,6 +52,14 @@ class UniversalAIApp(ctk.CTk):
         self.minsize(1000, 640)
         self.configure(fg_color=theme.COLOR_CANVAS)
 
+        # Set official window icon
+        try:
+            icon_p = os.path.join(CURRENT_DIR, "app_icon.ico")
+            if os.path.exists(icon_p):
+                self.iconbitmap(icon_p)
+        except Exception:
+            pass
+
         self._build_layout()
         self._select_tab("chat")
 
@@ -93,6 +101,18 @@ class UniversalAIApp(ctk.CTk):
         # Brand on Left
         brand_left = ctk.CTkFrame(self.top_header, fg_color="transparent")
         brand_left.pack(side="left", padx=16, pady=8)
+
+        # Brand Logo Image
+        try:
+            from PIL import Image as PILImage
+            logo_p = os.path.join(CURRENT_DIR, "assets", "logo.png")
+            if os.path.exists(logo_p):
+                pil_img = PILImage.open(logo_p)
+                self._header_logo_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(24, 24))
+                lbl_icon = ctk.CTkLabel(brand_left, image=self._header_logo_img, text="")
+                lbl_icon.pack(side="left", padx=(0, 8))
+        except Exception:
+            pass
 
         lbl_logo = ctk.CTkLabel(brand_left, text="OmniAI Studio", font=theme.FONT_TITLE,
                                 text_color=theme.COLOR_TEXT_MAIN)

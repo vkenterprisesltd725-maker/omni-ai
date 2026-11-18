@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="metalGradS" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="30%" stop-color="#F4F4F5" />
+      <stop offset="70%" stop-color="#A1A1AA" />
+      <stop offset="100%" stop-color="#E4E4E7" />
+    </linearGradient>
+    <linearGradient id="accentGradS" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE68A" />
+      <stop offset="45%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <linearGradient id="coreGradS" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#71717A" />
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(256, 270)">
+    <path d="M -140 115 L -84 115 C -50 115, -40 85, -40 56 C -40 -20, -110 -70, -110 -130 C -110 -195, -60 -210, 0 -210 C 60 -210, 110 -195, 110 -130 C 110 -70, 40 -20, 40 56 C 40 85, 50 115, 84 115 L 140 115"
+          fill="none" stroke="url(#metalGradS)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M -105 115 C -70 115, -50 70, 0 -30 C 50 70, 70 115, 105 115"
+          fill="none" stroke="url(#accentGradS)" stroke-width="16" stroke-linecap="round" opacity="0.95" />
+    <polygon points="0,-160 38,-115 0,-70 -38,-115" fill="url(#coreGradS)" stroke="#FFFFFF" stroke-width="2" />
+    <circle cx="0" cy="-115" r="7" fill="#FFFFFF" />
+    <circle cx="-136" cy="115" r="10" fill="#FFFFFF" />
+    <circle cx="136" cy="115" r="10" fill="#F59E0B" />
+  </g>
+</svg>
