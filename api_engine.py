@@ -58,7 +58,7 @@ PROVIDERS = {
         "id": "groq",
         "type": "openai_compat",
         "base_url": "https://api.groq.com/openai/v1",
-        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
+        "models": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
         "key_hint": "gsk_... (Supports multiple keys)",
         "has_chat": True,
         "has_image": False,

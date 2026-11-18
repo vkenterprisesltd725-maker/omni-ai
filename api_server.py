@@ -116,6 +116,8 @@ def resolve_model_and_provider(requested_model: str) -> Tuple[str, str]:
             return "Pollinations (Free - No Key)", clean
         elif prefix in ["custom", "ollama", "local"]:
             return "Custom OpenAI Endpoint", clean
+        elif cfg.get_keys("openrouter"):
+            return "OpenRouter (300+ Models)", requested_model
 
     # Direct name mapping
     if any(k in m for k in ["gpt-4", "gpt-3.5", "o1", "o3", "dall-e"]):
@@ -124,7 +126,7 @@ def resolve_model_and_provider(requested_model: str) -> Tuple[str, str]:
         return "Google Gemini", requested_model
     elif "claude" in m:
         return "Anthropic Claude", requested_model
-    elif any(k in m for k in ["llama", "mixtral", "gemma"]) and cfg.get_keys("groq"):
+    elif any(k in m for k in ["gpt-oss", "qwen", "llama", "mixtral", "gemma"]) and cfg.get_keys("groq"):
         return "Groq (Free & Ultra-Fast)", requested_model
     elif "deepseek" in m:
         return "DeepSeek", requested_model
@@ -132,6 +134,8 @@ def resolve_model_and_provider(requested_model: str) -> Tuple[str, str]:
         return "Mistral AI", requested_model
     elif "pollinations" in m:
         return "Pollinations (Free - No Key)", "openai"
+    elif cfg.get_keys("openrouter"):
+        return "OpenRouter (300+ Models)", requested_model
 
     # Fallback to active provider or Custom Endpoint
     active_prov = cfg.get_setting("active_provider", "Pollinations (Free - No Key)")

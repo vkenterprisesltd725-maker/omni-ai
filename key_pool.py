@@ -154,6 +154,12 @@ class ProviderKeyPool:
                 ]
             }
 
+    def is_rate_limit_error(self, status_code: int, error_text: str) -> bool:
+        if status_code in [429, 503]:
+            return True
+        low_txt = str(error_text).lower()
+        return any(kw in low_txt for kw in RATE_LIMIT_KEYWORDS)
+
 class KeyPoolManager:
     def __init__(self):
         self.pools: Dict[str, ProviderKeyPool] = {}
