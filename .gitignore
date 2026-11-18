@@ -1,0 +1,36 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller / Build Artifacts
+build/
+dist/
+*.spec
+
+# Confidential & Local Data (Never commit private API keys!)
+portable_config.json
+config.json
+chat_history/
+*.env
+*.pem
+*.key
+
+# Generated Outputs
+generated_images/
+generated_videos/
+*.mp4
+*.png
+*.jpg
+*.jpeg
+
+# IDEs & OS Files
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Compiled Executables (Publish as GitHub Releases)
+*.exe
