@@ -21,7 +21,7 @@ from PIL import Image, ImageTk
 import pyperclip
 
 from config import cfg, OUTPUTS_IMAGE_DIR, BASE_DIR
-from api_engine import engine, PROVIDERS
+from api_engine import engine, PROVIDERS, is_model_free
 from key_pool import key_pools
 import ui.theme as theme
 
@@ -76,6 +76,10 @@ class ChatTab(ctk.CTkFrame):
         self.current_conversation_title: Optional[str] = None
         self.current_conversation_file: Optional[str] = None
         self.is_history_visible: bool = False  # Hidden by default; toggled via three-line menu button (☰)
+
+        # Free models filter & model cache
+        self.free_only_mode: bool = False
+        self.raw_models_cache: List[str] = []
 
         self._build_ui()
         self._update_failover_telemetry()
@@ -408,7 +412,7 @@ class ChatTab(ctk.CTkFrame):
         self.btn_refresh_models = ctk.CTkButton(
             self.top_bar,
             text="↻",
-            width=32,
+            width=30,
             height=28,
             font=("Segoe UI Symbol", 13),
             fg_color="#F3F4F6",
@@ -416,31 +420,46 @@ class ChatTab(ctk.CTkFrame):
             text_color="#374151",
             command=self._fetch_models_threaded,
         )
-        self.btn_refresh_models.grid(row=0, column=5, padx=(2, 4), pady=8, sticky="w")
+        self.btn_refresh_models.grid(row=0, column=5, padx=(2, 2), pady=8, sticky="w")
         self.btn_fetch = self.btn_refresh_models
+
+        # Free Models Filter Pill Toggle
+        self.btn_free_filter = ctk.CTkButton(
+            self.top_bar,
+            text="🆓 Free",
+            width=64,
+            height=28,
+            font=("Segoe UI", 11, "bold"),
+            fg_color=theme.COLOR_CARD_HOVER,
+            hover_color=theme.COLOR_BORDER,
+            text_color=theme.COLOR_TEXT_MAIN,
+            corner_radius=6,
+            command=self._toggle_free_filter,
+        )
+        self.btn_free_filter.grid(row=0, column=6, padx=(2, 6), pady=8, sticky="w")
 
         # Temperature
         temp_lbl = ctk.CTkLabel(
             self.top_bar, text="Temp:", font=theme.FONT_SMALL,
             text_color=theme.COLOR_TEXT_MUTED,
         )
-        temp_lbl.grid(row=0, column=6, padx=(10, 2), pady=8, sticky="w")
+        temp_lbl.grid(row=0, column=7, padx=(6, 2), pady=8, sticky="w")
 
         self.temp_slider = ctk.CTkSlider(
-            self.top_bar, from_=0.0, to=1.5, number_of_steps=15, width=70,
+            self.top_bar, from_=0.0, to=1.5, number_of_steps=15, width=65,
             progress_color=theme.COLOR_ACCENT,
         )
         self.temp_slider.set(cfg.get_setting("temperature", 0.7))
-        self.temp_slider.grid(row=0, column=7, padx=2, pady=8, sticky="w")
+        self.temp_slider.grid(row=0, column=8, padx=2, pady=8, sticky="w")
 
         self.temp_val_lbl = ctk.CTkLabel(
             self.top_bar,
             text=f"{self.temp_slider.get():.1f}",
             font=theme.FONT_SMALL,
-            width=24,
+            width=22,
             text_color=theme.COLOR_TEXT_MUTED,
         )
-        self.temp_val_lbl.grid(row=0, column=8, padx=(2, 6), pady=8, sticky="w")
+        self.temp_val_lbl.grid(row=0, column=9, padx=(2, 4), pady=8, sticky="w")
         self.temp_slider.configure(
             command=lambda v: self.temp_val_lbl.configure(text=f"{float(v):.1f}")
         )
@@ -449,19 +468,19 @@ class ChatTab(ctk.CTkFrame):
         self.btn_sys = ctk.CTkButton(
             self.top_bar,
             text="Persona",
-            width=70,
+            width=65,
             font=theme.FONT_SMALL,
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
             command=self._open_system_prompt_dialog,
         )
-        self.btn_sys.grid(row=0, column=9, padx=4, pady=8, sticky="w")
+        self.btn_sys.grid(row=0, column=10, padx=4, pady=8, sticky="w")
 
-        # Telemetry pill (right-aligned)
+        # Telemetry & Quota Limit pills (right-aligned)
         self.failover_node_frame = ctk.CTkFrame(self.top_bar, fg_color="transparent")
-        self.failover_node_frame.grid(row=0, column=10, padx=(8, 12), pady=8, sticky="e")
-        self.top_bar.grid_columnconfigure(10, weight=1)
+        self.failover_node_frame.grid(row=0, column=11, padx=(6, 12), pady=8, sticky="e")
+        self.top_bar.grid_columnconfigure(11, weight=1)
 
         self.telemetry_pill = ctk.CTkLabel(
             self.failover_node_frame,
@@ -471,9 +490,24 @@ class ChatTab(ctk.CTkFrame):
             text_color=theme.COLOR_TEXT_DIM,
             corner_radius=6,
             height=26,
-            padx=8,
+            padx=6,
         )
         self.telemetry_pill.pack(side="right")
+
+        # Live Limits Inspector Pill Button
+        self.btn_limits_pill = ctk.CTkButton(
+            self.failover_node_frame,
+            text="⚡ Limits",
+            width=86,
+            height=26,
+            font=theme.FONT_BADGE,
+            fg_color=theme.COLOR_CARD_HOVER,
+            hover_color=theme.COLOR_BORDER,
+            text_color=theme.COLOR_TEXT_MAIN,
+            corner_radius=6,
+            command=self._open_limits_inspector,
+        )
+        self.btn_limits_pill.pack(side="right", padx=(0, 6))
 
     # -----------------------------------------------------------------
     # Chat viewport
@@ -674,24 +708,36 @@ class ChatTab(ctk.CTkFrame):
     # PROVIDER / MODEL SWITCHING & REAL-TIME FETCHING
     # ===================================================================
 
+    def _clean_model_name(self, text: str) -> str:
+        """Strip [FREE] visual badge from model name for internal engine calls."""
+        if not text:
+            return ""
+        val = str(text).strip()
+        if val.startswith("[FREE] "):
+            return val[7:].strip()
+        return val
+
     def _on_provider_change(self, choice: str):
         cfg.set_setting("active_provider", choice)
         self._update_failover_telemetry()
+        self._update_limits_pill(choice)
         self._fetch_models_threaded()
 
     def _on_model_change(self, choice: str):
-        if choice and not any(choice.startswith(p) for p in ("No key", "Fetching", "No models", "Loading")):
-            cfg.set_setting("active_model", choice)
+        clean = self._clean_model_name(choice)
+        if clean and not any(clean.startswith(p) for p in ("No key", "Fetching", "No models", "Loading", "No free models")):
+            cfg.set_setting("active_model", clean)
 
     def on_tab_visible(self):
         """Called whenever Chat tab is switched to; re-evaluates models if keys were updated."""
         self._update_failover_telemetry()
+        self._update_limits_pill()
         curr = self.model_combo.get()
         if not curr or any(curr.startswith(p) for p in ("No key", "No models", "Loading")):
             self._fetch_models_threaded()
 
     # ===================================================================
-    # TELEMETRY
+    # TELEMETRY & QUOTA PILLS
     # ===================================================================
 
     def _update_failover_telemetry(self):
@@ -737,6 +783,38 @@ class ChatTab(ctk.CTkFrame):
                     text_color=theme.COLOR_TEXT_DIM,
                 )
 
+    def _update_limits_pill(self, prov: str = ""):
+        if not hasattr(self, "btn_limits_pill"):
+            return
+        if not prov:
+            prov = self.provider_combo.get()
+        prov_id = PROVIDERS.get(prov, {}).get("id", "openai")
+        pool = key_pools.get_pool(prov_id)
+        limits = pool.get_latest_rate_limits() or engine.latest_provider_limits.get(prov_id, {})
+
+        if prov_id == "pollinations":
+            self.btn_limits_pill.configure(text="⚡ Free Mode")
+        elif prov_id == "groq" and not limits:
+            self.btn_limits_pill.configure(text="⚡ 30 RPM Free")
+        elif prov_id == "gemini" and not limits:
+            self.btn_limits_pill.configure(text="⚡ 15 RPM Free")
+        elif limits:
+            req_rem = limits.get("req_remaining")
+            req_lim = limits.get("req_limit")
+            tok_rem = limits.get("tok_remaining")
+            if req_rem is not None and req_lim is not None:
+                self.btn_limits_pill.configure(text=f"⚡ {req_rem}/{req_lim} RPM")
+            elif tok_rem is not None:
+                try:
+                    tok_val = int(tok_rem)
+                    self.btn_limits_pill.configure(text=f"⚡ {tok_val//1000}k TPM")
+                except Exception:
+                    self.btn_limits_pill.configure(text="⚡ Limits: OK")
+            else:
+                self.btn_limits_pill.configure(text="⚡ Limits: OK")
+        else:
+            self.btn_limits_pill.configure(text="⚡ Limits")
+
     def _on_key_failover_event(self, event: Dict[str, Any]):
         evt_type = event.get("type")
         if evt_type in ("failover", "keys_updated"):
@@ -753,10 +831,39 @@ class ChatTab(ctk.CTkFrame):
                         f"Auto-switched key: {p} ({old_k} -> {new_k})"
                     ),
                 )
+        elif evt_type == "rate_limit_update":
+            self.after(0, self._update_limits_pill)
 
     # ===================================================================
-    # REAL-TIME MODEL FETCHING
+    # FREE MODELS FILTER & REAL-TIME MODEL FETCHING
     # ===================================================================
+
+    def _toggle_free_filter(self):
+        self.free_only_mode = not self.free_only_mode
+        if self.free_only_mode:
+            self.btn_free_filter.configure(
+                text="✓ Free",
+                fg_color="#059669",
+                hover_color="#047857",
+                text_color="#FFFFFF"
+            )
+            if self.status_callback:
+                self.status_callback("Showing 100% Free models only.")
+        else:
+            self.btn_free_filter.configure(
+                text="🆓 Free",
+                fg_color=theme.COLOR_CARD_HOVER,
+                hover_color=theme.COLOR_BORDER,
+                text_color=theme.COLOR_TEXT_MAIN
+            )
+            if self.status_callback:
+                self.status_callback("Showing all available models.")
+
+        prov = self.provider_combo.get()
+        if self.raw_models_cache:
+            self._apply_fetched_models(prov, self.raw_models_cache)
+        else:
+            self._fetch_models_threaded()
 
     def _fetch_models_threaded(self):
         prov = self.provider_combo.get()
@@ -769,7 +876,6 @@ class ChatTab(ctk.CTkFrame):
         is_free = (prov_id == "pollinations")
 
         if not has_key and not is_free:
-            # Show ONLY available models based on entered key -> 0 keys entered, so no models available
             self.model_combo.configure(values=["No key entered (Add in Keys tab)"])
             self.model_combo.set("No key entered (Add in Keys tab)")
             if self.status_callback:
@@ -800,23 +906,182 @@ class ChatTab(ctk.CTkFrame):
         if self.provider_combo.get() != prov:
             return
 
-        if not models:
+        self.raw_models_cache = [self._clean_model_name(m) for m in models if m]
+
+        if not self.raw_models_cache:
             self.model_combo.configure(values=["No models found (Check key)"])
             self.model_combo.set("No models found (Check key)")
             if self.status_callback:
                 self.status_callback(f"Could not load models for {prov}. Check API key.")
             return
 
-        self.model_combo.configure(values=models)
-        saved_model = cfg.get_setting("active_model", "")
-        if saved_model in models:
-            self.model_combo.set(saved_model)
+        # Filter by Free-Only mode if enabled
+        if self.free_only_mode:
+            models_to_show = [
+                m for m in self.raw_models_cache
+                if is_model_free(prov, m, engine.openrouter_free_model_ids)
+            ]
+            if not models_to_show:
+                self.model_combo.configure(values=["No free models for this provider"])
+                self.model_combo.set("No free models for this provider")
+                if self.status_callback:
+                    self.status_callback(f"No 100% free models found for {prov}.")
+                return
         else:
-            self.model_combo.set(models[0])
-            cfg.set_setting("active_model", models[0])
+            models_to_show = self.raw_models_cache
+
+        # Format visual badge [FREE] for free models
+        display_values = []
+        for m in models_to_show:
+            if is_model_free(prov, m, engine.openrouter_free_model_ids):
+                display_values.append(f"[FREE] {m}")
+            else:
+                display_values.append(m)
+
+        self.model_combo.configure(values=display_values)
+        saved_model = self._clean_model_name(cfg.get_setting("active_model", ""))
+        matching = [dv for dv in display_values if self._clean_model_name(dv) == saved_model]
+
+        if matching:
+            self.model_combo.set(matching[0])
+        else:
+            self.model_combo.set(display_values[0])
+            cfg.set_setting("active_model", self._clean_model_name(display_values[0]))
 
         if self.status_callback:
-            self.status_callback(f"Loaded {len(models)} live available models for {prov}.")
+            free_cnt = sum(1 for m in models_to_show if is_model_free(prov, m, engine.openrouter_free_model_ids))
+            self.status_callback(f"Loaded {len(models_to_show)} models ({free_cnt} free) for {prov}.")
+
+        self._update_limits_pill(prov)
+
+    # ===================================================================
+    # API LIMITS & QUOTA INSPECTOR MODAL
+    # ===================================================================
+
+    def _open_limits_inspector(self, provider: Optional[str] = None):
+        prov = provider or self.provider_combo.get()
+        prov_info = PROVIDERS.get(prov, {})
+        prov_id = prov_info.get("id", "openai")
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"API Rate Limits & Quotas — {prov}")
+        dialog.geometry("540x510")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Header card
+        header = ctk.CTkFrame(dialog, fg_color=theme.COLOR_CARD_ALT, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
+        header.pack(fill="x", padx=16, pady=(16, 10))
+
+        h_top = ctk.CTkFrame(header, fg_color="transparent")
+        h_top.pack(fill="x", padx=14, pady=(10, 4))
+
+        title = ctk.CTkLabel(h_top, text=f"⚡ {prov}", font=theme.FONT_HEADING, text_color=theme.COLOR_TEXT_MAIN)
+        title.pack(side="left")
+
+        pool = key_pools.get_pool(prov_id)
+        stats = pool.get_stats()
+        key_count = stats["total_keys"]
+        key_status_text = f"{key_count} Keys" if key_count > 1 else ("1 Key" if key_count == 1 else "No Key")
+        badge = ctk.CTkLabel(h_top, text=key_status_text, font=theme.FONT_BADGE, text_color=theme.COLOR_TEXT_DIM)
+        badge.pack(side="right")
+
+        active_k = pool.get_active_key()
+        masked_key = active_k.get_masked() if active_k else "None configured"
+        desc = ctk.CTkLabel(
+            header,
+            text=f"Active Key: {masked_key} • Failover Pool: {stats['active_keys']} Active, {stats['cooldown_keys']} Cooldown",
+            font=theme.FONT_SMALL,
+            text_color=theme.COLOR_TEXT_MUTED
+        )
+        desc.pack(anchor="w", padx=14, pady=(0, 10))
+
+        # Content frame
+        content = ctk.CTkFrame(dialog, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=16, pady=4)
+
+        loading_lbl = ctk.CTkLabel(content, text="Querying provider quota and rate limits...", font=theme.FONT_BODY, text_color=theme.COLOR_TEXT_MUTED)
+        loading_lbl.pack(pady=30)
+
+        def populate(quota_data: Dict[str, Any]):
+            loading_lbl.pack_forget()
+
+            # Rate Limits Section
+            rl_card = ctk.CTkFrame(content, fg_color=theme.COLOR_CARD, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
+            rl_card.pack(fill="x", pady=6)
+
+            rl_header = ctk.CTkLabel(rl_card, text="Rate Limits & Quota Telemetry", font=theme.FONT_BODY_BOLD, text_color=theme.COLOR_TEXT_MAIN)
+            rl_header.pack(anchor="w", padx=14, pady=(8, 4))
+
+            limits = quota_data.get("limits", {})
+            req_rem = limits.get("req_remaining")
+            req_lim = limits.get("req_limit")
+            tok_rem = limits.get("tok_remaining")
+            tok_lim = limits.get("tok_limit")
+            req_reset = limits.get("req_reset")
+            tok_reset = limits.get("tok_reset")
+
+            info_text = quota_data.get("info", "")
+            if info_text:
+                info_lbl = ctk.CTkLabel(rl_card, text=info_text, font=theme.FONT_SMALL, text_color=theme.COLOR_TEXT_MUTED, justify="left", wraplength=480)
+                info_lbl.pack(anchor="w", padx=14, pady=(0, 8))
+
+            if req_rem or req_lim:
+                req_frame = ctk.CTkFrame(rl_card, fg_color="transparent")
+                req_frame.pack(fill="x", padx=14, pady=(0, 6))
+                r_lbl = ctk.CTkLabel(req_frame, text=f"Requests Remaining: {req_rem or 'N/A'} / {req_lim or 'N/A'}", font=theme.FONT_BODY, text_color=theme.COLOR_TEXT_MAIN)
+                r_lbl.pack(side="left")
+                if req_reset:
+                    res_lbl = ctk.CTkLabel(req_frame, text=f"Reset in: {req_reset}s", font=theme.FONT_SMALL, text_color=theme.COLOR_TEXT_DIM)
+                    res_lbl.pack(side="right")
+
+            if tok_rem or tok_lim:
+                tok_frame = ctk.CTkFrame(rl_card, fg_color="transparent")
+                tok_frame.pack(fill="x", padx=14, pady=(0, 8))
+                t_lbl = ctk.CTkLabel(tok_frame, text=f"Tokens Remaining: {tok_rem or 'N/A'} / {tok_lim or 'N/A'}", font=theme.FONT_BODY, text_color=theme.COLOR_TEXT_MAIN)
+                t_lbl.pack(side="left")
+                if tok_reset:
+                    res2_lbl = ctk.CTkLabel(tok_frame, text=f"Reset in: {tok_reset}s", font=theme.FONT_SMALL, text_color=theme.COLOR_TEXT_DIM)
+                    res2_lbl.pack(side="right")
+
+            # Account Balance Section
+            bal = quota_data.get("balance")
+            if bal:
+                bal_card = ctk.CTkFrame(content, fg_color=theme.COLOR_CARD, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
+                bal_card.pack(fill="x", pady=6)
+
+                b_head = ctk.CTkLabel(bal_card, text="Account Balance & Credit Usage", font=theme.FONT_BODY_BOLD, text_color=theme.COLOR_TEXT_MAIN)
+                b_head.pack(anchor="w", padx=14, pady=(8, 4))
+
+                b_val = ctk.CTkLabel(bal_card, text=f"Balance: {bal}", font=theme.FONT_BODY, text_color=theme.COLOR_ACCENT)
+                b_val.pack(anchor="w", padx=14, pady=(0, 8))
+
+            # Free Models Status
+            free_card = ctk.CTkFrame(content, fg_color=theme.COLOR_CARD, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
+            free_card.pack(fill="x", pady=6)
+
+            is_free = quota_data.get("is_free", False) or is_model_free(prov, "")
+            status_symbol = "✓" if is_free else "ℹ"
+            status_text = "This provider has 100% Free / Free-Tier models available in OmniAI Studio." if is_free else "This provider uses standard pay-per-token pricing."
+
+            f_lbl = ctk.CTkLabel(free_card, text=f"{status_symbol} {status_text}", font=theme.FONT_SMALL, text_color="#059669" if is_free else theme.COLOR_TEXT_MUTED, wraplength=480, justify="left")
+            f_lbl.pack(anchor="w", padx=14, pady=8)
+
+        def query():
+            data = engine.check_provider_balance_and_limits(prov_id)
+            try:
+                dialog.after(0, lambda: populate(data))
+            except Exception:
+                pass
+
+        threading.Thread(target=query, daemon=True).start()
+
+        # Bottom buttons
+        btn_bar = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_bar.pack(fill="x", padx=16, pady=(8, 16))
+
+        btn_close = ctk.CTkButton(btn_bar, text="Close", width=80, fg_color=theme.COLOR_CARD_HOVER, hover_color=theme.COLOR_BORDER, text_color=theme.COLOR_TEXT_MAIN, command=dialog.destroy)
+        btn_close.pack(side="right")
 
     # ===================================================================
     # SYSTEM PROMPT DIALOG
@@ -960,10 +1225,10 @@ class ChatTab(ctk.CTkFrame):
         self._remove_attachment()
 
         provider = self.provider_combo.get()
-        model = self.model_combo.get()
+        model = self._clean_model_name(self.model_combo.get())
 
         # Check if provider has no key configured or error
-        if any(model.startswith(p) for p in ("No key", "Fetching", "No models", "Loading")):
+        if any(model.startswith(p) for p in ("No key", "Fetching", "No models", "Loading", "No free models")):
             messagebox.showwarning(
                 "Model Unavailable",
                 f"Please enter an API key for {provider} in the Keys tab before sending a message."
@@ -1428,7 +1693,7 @@ class ChatTab(ctk.CTkFrame):
             "updated_at": now,
             "messages": self.messages,
             "provider": self.provider_combo.get(),
-            "model": self.model_combo.get(),
+            "model": self._clean_model_name(self.model_combo.get()),
         }
 
         # Preserve created_at from existing file

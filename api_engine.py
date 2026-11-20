@@ -149,6 +149,97 @@ def encode_image_to_base64(image_path: str) -> Tuple[str, str]:
         data = f.read()
     return base64.b64encode(data).decode("utf-8"), mime
 
+
+def extract_rate_limits_from_headers(headers: Any) -> Dict[str, Any]:
+    """Extract standard rate limit telemetry from HTTP response headers."""
+    if not headers:
+        return {}
+    h = {str(k).lower(): str(v) for k, v in headers.items()}
+    limits: Dict[str, Any] = {}
+
+    # Remaining Requests
+    for k in ("x-ratelimit-remaining-requests", "anthropic-ratelimit-requests-remaining", "x-ratelimit-remaining-requests-day", "ratelimit-remaining"):
+        if k in h:
+            limits["req_remaining"] = h[k]
+            break
+
+    # Limit Requests
+    for k in ("x-ratelimit-limit-requests", "anthropic-ratelimit-requests-limit", "x-ratelimit-limit-requests-day", "ratelimit-limit"):
+        if k in h:
+            limits["req_limit"] = h[k]
+            break
+
+    # Reset Requests
+    for k in ("x-ratelimit-reset-requests", "anthropic-ratelimit-requests-reset", "ratelimit-reset"):
+        if k in h:
+            limits["req_reset"] = h[k]
+            break
+
+    # Remaining Tokens
+    for k in ("x-ratelimit-remaining-tokens", "anthropic-ratelimit-tokens-remaining", "x-ratelimit-remaining-tokens-minute"):
+        if k in h:
+            limits["tok_remaining"] = h[k]
+            break
+
+    # Limit Tokens
+    for k in ("x-ratelimit-limit-tokens", "anthropic-ratelimit-tokens-limit", "x-ratelimit-limit-tokens-minute"):
+        if k in h:
+            limits["tok_limit"] = h[k]
+            break
+
+    # Reset Tokens
+    for k in ("x-ratelimit-reset-tokens", "anthropic-ratelimit-tokens-reset"):
+        if k in h:
+            limits["tok_reset"] = h[k]
+            break
+
+    if "retry-after" in h:
+        limits["retry_after"] = h["retry-after"]
+
+    return limits
+
+
+def is_model_free(provider_str: str, model_id: str, openrouter_free_set: Optional[set] = None) -> bool:
+    """Determine whether a model is 100% free / free tier."""
+    pid = str(provider_str).lower()
+    mid = str(model_id).lower().strip()
+
+    if mid.startswith("[free]"):
+        return True
+
+    # Groq: 100% free developer tier for ALL models
+    if "groq" in pid:
+        return True
+
+    # Pollinations: 100% free forever without key
+    if "pollinations" in pid:
+        return True
+
+    # Custom/Local: 100% free on user hardware
+    if "custom" in pid or "localhost" in pid or "127.0.0.1" in pid or "11434" in pid:
+        return True
+
+    # OpenRouter: models with :free suffix or tagged $0
+    if "openrouter" in pid:
+        if ":free" in mid or (openrouter_free_set and model_id in openrouter_free_set):
+            return True
+
+    # Google Gemini: standard AI Studio free tier models
+    if "gemini" in pid or "google" in pid:
+        free_gemini = [
+            "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro",
+            "gemini-exp", "learnlm"
+        ]
+        if any(fg in mid for fg in free_gemini):
+            return True
+
+    # Cerebras: free tier models
+    if "cerebras" in pid:
+        return True
+
+    return False
+
+
 class AIEngine:
     def __init__(self):
         self.session = requests.Session()
@@ -157,6 +248,8 @@ class AIEngine:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             "Accept": "*/*"
         })
+        self.latest_provider_limits: Dict[str, Dict[str, Any]] = {}
+        self.openrouter_free_model_ids: set = set()
 
     # -------------------------------------------------------------------------
     # CHAT STREAM WITH AUTO-FAILOVER MULTI-KEY ROTATION
@@ -225,7 +318,9 @@ class AIEngine:
                         max_tokens=max_tokens,
                         image_path=image_path,
                         callback_chunk=callback_chunk,
-                        cancel_event=cancel_event
+                        cancel_event=cancel_event,
+                        prov_id=prov_id,
+                        key_item=active_item
                     )
                 elif prov_type == "gemini":
                     full_text = self._stream_gemini(
@@ -238,7 +333,9 @@ class AIEngine:
                         max_tokens=max_tokens,
                         image_path=image_path,
                         callback_chunk=callback_chunk,
-                        cancel_event=cancel_event
+                        cancel_event=cancel_event,
+                        prov_id=prov_id,
+                        key_item=active_item
                     )
                 elif prov_type == "claude":
                     full_text = self._stream_claude(
@@ -251,7 +348,9 @@ class AIEngine:
                         max_tokens=max_tokens,
                         image_path=image_path,
                         callback_chunk=callback_chunk,
-                        cancel_event=cancel_event
+                        cancel_event=cancel_event,
+                        prov_id=prov_id,
+                        key_item=active_item
                     )
                 elif prov_type == "pollinations":
                     full_text = self._stream_pollinations(
@@ -275,7 +374,14 @@ class AIEngine:
                 
                 # Check for rate limit or quota exhaustion to trigger auto-failover
                 if pool.is_rate_limit_error(status_code, last_error) and len(keys_pool) > 1 and attempt < max_attempts - 1:
-                    next_item = pool.rotate_to_next(api_key, cooldown_secs=60.0, error_msg=last_error)
+                    cooldown_secs = 60.0
+                    cached_limits = self.latest_provider_limits.get(prov_id, {})
+                    if cached_limits and "retry_after" in cached_limits:
+                        try:
+                            cooldown_secs = max(5.0, float(cached_limits["retry_after"]))
+                        except Exception:
+                            pass
+                    next_item = pool.rotate_to_next(api_key, cooldown_secs=cooldown_secs, error_msg=last_error)
                     key_pools.emit_event("failover", prov_id, {
                         "old_key": active_item.get_masked() if active_item else "key",
                         "new_key": next_item.get_masked() if next_item else "next",
@@ -366,7 +472,9 @@ class AIEngine:
         max_tokens: int,
         image_path: Optional[str],
         callback_chunk: Optional[Callable[[str], None]],
-        cancel_event
+        cancel_event,
+        prov_id: str = "",
+        key_item = None
     ) -> str:
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -404,6 +512,19 @@ class AIEngine:
         }
 
         resp = self.session.post(endpoint, headers=headers, json=payload, stream=True, timeout=(10, 120))
+
+        # Real-time rate limit telemetry
+        limits = extract_rate_limits_from_headers(resp.headers)
+        if limits:
+            if key_item:
+                key_item.update_rate_limits(limits)
+            if prov_id:
+                self.latest_provider_limits[prov_id] = limits
+                key_pools.emit_event("rate_limit_update", prov_id, {
+                    "limits": limits,
+                    "key": key_item.get_masked() if key_item else ""
+                })
+
         if resp.status_code != 200:
             try:
                 err_text = resp.json().get("error", {}).get("message", resp.text)
@@ -451,7 +572,9 @@ class AIEngine:
         max_tokens: int,
         image_path: Optional[str],
         callback_chunk: Optional[Callable[[str], None]],
-        cancel_event
+        cancel_event,
+        prov_id: str = "",
+        key_item = None
     ) -> str:
         clean_model = model.replace("models/", "")
         endpoint = f"{base_url}/models/{clean_model}:streamGenerateContent?alt=sse&key={api_key}"
@@ -474,6 +597,19 @@ class AIEngine:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
         resp = self.session.post(endpoint, headers={"Content-Type": "application/json"}, json=payload, stream=True, timeout=(10, 120))
+
+        # Real-time rate limit telemetry
+        limits = extract_rate_limits_from_headers(resp.headers)
+        if limits:
+            if key_item:
+                key_item.update_rate_limits(limits)
+            if prov_id:
+                self.latest_provider_limits[prov_id] = limits
+                key_pools.emit_event("rate_limit_update", prov_id, {
+                    "limits": limits,
+                    "key": key_item.get_masked() if key_item else ""
+                })
+
         if resp.status_code != 200:
             try:
                 err_text = resp.json().get("error", {}).get("message", resp.text)
@@ -518,7 +654,9 @@ class AIEngine:
         max_tokens: int,
         image_path: Optional[str],
         callback_chunk: Optional[Callable[[str], None]],
-        cancel_event
+        cancel_event,
+        prov_id: str = "",
+        key_item = None
     ) -> str:
         endpoint = f"{base_url}/messages"
         headers = {
@@ -555,6 +693,19 @@ class AIEngine:
             payload["system"] = system_prompt
 
         resp = self.session.post(endpoint, headers=headers, json=payload, stream=True, timeout=(10, 120))
+
+        # Real-time rate limit telemetry
+        limits = extract_rate_limits_from_headers(resp.headers)
+        if limits:
+            if key_item:
+                key_item.update_rate_limits(limits)
+            if prov_id:
+                self.latest_provider_limits[prov_id] = limits
+                key_pools.emit_event("rate_limit_update", prov_id, {
+                    "limits": limits,
+                    "key": key_item.get_masked() if key_item else ""
+                })
+
         if resp.status_code != 200:
             try:
                 err_text = resp.json().get("error", {}).get("message", resp.text)
@@ -1010,6 +1161,18 @@ class AIEngine:
                 resp = self.session.get(f"{base_url}/models", headers=headers, timeout=10)
                 if resp.status_code == 200:
                     data = resp.json().get("data", [])
+                    if prov_id == "openrouter":
+                        fetched = []
+                        for m in data:
+                            mid = m.get("id")
+                            if mid:
+                                fetched.append(mid)
+                                pricing = m.get("pricing", {})
+                                if (pricing.get("prompt") == "0" and pricing.get("completion") == "0") or mid.endswith(":free"):
+                                    self.openrouter_free_model_ids.add(mid)
+                        if fetched:
+                            return sorted(fetched)
+
                     fetched = [m.get("id") for m in data if m.get("id")]
                     if fetched:
                         if prov_id == "openai":
@@ -1060,6 +1223,130 @@ class AIEngine:
             pass
 
         return fallback_models
+
+    def check_provider_balance_and_limits(self, provider_id: str, api_key: str = "") -> Dict[str, Any]:
+        """Fetch account balance, credit usage, and active rate limits for a provider."""
+        prov_id = str(provider_id).lower()
+        res: Dict[str, Any] = {
+            "provider": provider_id,
+            "balance": None,
+            "currency": "USD",
+            "limits": {},
+            "is_free": False,
+            "info": "",
+            "status": "Ready"
+        }
+
+        if not api_key:
+            pool = key_pools.get_pool(prov_id)
+            active = pool.get_active_key()
+            api_key = active.key if active else cfg.get_key(prov_id)
+
+        # Retrieve cached real-time rate limit headers
+        cached = dict(self.latest_provider_limits.get(prov_id, {}))
+        res["limits"] = cached
+
+        if prov_id == "pollinations":
+            res["is_free"] = True
+            res["info"] = "100% Free Forever (No API Key Required). Unlimited Text, Image & Video requests."
+            res["status"] = "Active (100% Free)"
+            return res
+
+        if prov_id == "groq":
+            res["is_free"] = True
+            res["info"] = "100% Free Developer Tier (30 RPM, 6,000–14,400 TPM, 14,400 RPD)."
+            res["status"] = "Active (Free Tier)"
+            if not cached:
+                res["limits"] = {"req_limit": "30 RPM", "tok_limit": "6,000–14,400 TPM"}
+            return res
+
+        if prov_id == "gemini":
+            res["is_free"] = True
+            res["info"] = "Google AI Studio Free Tier (15 RPM / 1M TPM / 1,500 RPD for Flash; 2 RPM for Pro)."
+            res["status"] = "Active (Free Tier)"
+            if not cached:
+                res["limits"] = {"req_limit": "15 RPM (Flash) / 2 RPM (Pro)", "tok_limit": "1M TPM (Flash) / 32k TPM (Pro)"}
+            return res
+
+        if prov_id == "openrouter":
+            if not api_key:
+                res["info"] = "No API key configured. Enter your OpenRouter key in the Keys tab."
+                res["status"] = "No Key"
+                return res
+            try:
+                headers = {"Authorization": f"Bearer {api_key}"}
+                r = self.session.get("https://openrouter.ai/api/v1/auth/key", headers=headers, timeout=8)
+                if r.status_code == 200:
+                    data = r.json().get("data", {})
+                    usage = data.get("usage", 0.0)
+                    limit = data.get("limit")
+                    is_free_tier = data.get("is_free_tier", False)
+                    rate_limit = data.get("rate_limit", {})
+
+                    res["is_free"] = is_free_tier
+                    if limit is not None:
+                        rem = max(0.0, float(limit) - float(usage))
+                        res["balance"] = f"${rem:.4f} remaining (Limit: ${float(limit):.2f}, Spent: ${float(usage):.4f})"
+                    else:
+                        res["balance"] = f"Pay-as-you-go (Spent: ${float(usage):.4f})"
+
+                    if rate_limit:
+                        res["limits"]["req_limit"] = f"{rate_limit.get('requests', '')} per {rate_limit.get('interval', '')}"
+                    res["info"] = f"Key Label: {data.get('label', 'Default')} • Free Tier: {is_free_tier}"
+                    res["status"] = "Key Verified"
+                else:
+                    res["info"] = f"HTTP {r.status_code}: {r.text[:80]}"
+                    res["status"] = f"HTTP {r.status_code}"
+            except Exception as e:
+                res["info"] = f"Network Error: {e}"
+                res["status"] = "Error"
+            return res
+
+        if prov_id == "deepseek":
+            if not api_key:
+                res["info"] = "No API key configured."
+                res["status"] = "No Key"
+                return res
+            try:
+                headers = {"Authorization": f"Bearer {api_key}"}
+                r = self.session.get("https://api.deepseek.com/user/balance", headers=headers, timeout=8)
+                if r.status_code == 200:
+                    data = r.json()
+                    b_infos = data.get("balance_infos", [])
+                    if b_infos:
+                        b0 = b_infos[0]
+                        res["balance"] = f"{b0.get('total_balance', '0.00')} {b0.get('currency', 'CNY')}"
+                        res["currency"] = b0.get("currency", "CNY")
+                    res["info"] = "DeepSeek Account Balance Verified"
+                    res["status"] = "Verified"
+                else:
+                    res["info"] = f"HTTP {r.status_code}: {r.text[:80]}"
+                    res["status"] = f"HTTP {r.status_code}"
+            except Exception as e:
+                res["info"] = f"Network Error: {e}"
+                res["status"] = "Error"
+            return res
+
+        if prov_id in ("openai", "claude", "mistral", "stability", "replicate"):
+            if not api_key:
+                res["info"] = "No API key configured."
+                res["status"] = "No Key"
+                return res
+            if cached:
+                res["info"] = "Live rate limit headers active."
+                res["status"] = "Live Headers Active"
+            else:
+                res["info"] = "Send a prompt to capture real-time RPM/TPM response headers."
+                res["status"] = "Ready"
+            return res
+
+        if prov_id == "custom":
+            res["is_free"] = True
+            res["info"] = "Local endpoint (e.g. Ollama/LM Studio) runs 100% free locally on your system."
+            res["status"] = "Local Execution"
+            return res
+
+        return res
 
 # Global engine singleton
 engine = AIEngine()

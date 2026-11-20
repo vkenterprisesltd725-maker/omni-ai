@@ -33,6 +33,13 @@ class KeyItem:
         self.total_fails = 0
         self.last_used = 0.0
         self.last_error = ""
+        self.rate_limits: Dict[str, Any] = {}
+        self.last_limits_update = 0.0
+
+    def update_rate_limits(self, limits: Dict[str, Any]):
+        if limits:
+            self.rate_limits.update(limits)
+            self.last_limits_update = time.time()
 
     def is_available(self) -> bool:
         if self.status == "invalid":
@@ -133,6 +140,13 @@ class ProviderKeyPool:
                     item.mark_success()
                     break
 
+    def get_latest_rate_limits(self) -> Dict[str, Any]:
+        with self.lock:
+            for item in self.keys:
+                if item.rate_limits:
+                    return dict(item.rate_limits)
+            return {}
+
     def get_stats(self) -> Dict[str, Any]:
         with self.lock:
             total = len(self.keys)
@@ -148,7 +162,8 @@ class ProviderKeyPool:
                         "status": k.status,
                         "cooldown_remaining": max(0, int(k.cooldown_until - time.time())),
                         "success": k.total_success,
-                        "fails": k.total_fails
+                        "fails": k.total_fails,
+                        "rate_limits": dict(k.rate_limits)
                     }
                     for k in self.keys
                 ]

@@ -13,7 +13,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from config import cfg, CONFIG_FILE, parse_keys_string
-from api_engine import engine, PROVIDERS
+from api_engine import engine, PROVIDERS, is_model_free
 from key_pool import key_pools
 import ui.theme as theme
 
@@ -136,7 +136,7 @@ class KeysTab(ctk.CTkFrame):
         btn_test = ctk.CTkButton(
             header,
             text="Test",
-            width=65,
+            width=58,
             height=24,
             font=theme.FONT_SMALL,
             fg_color="#F3F4F6",
@@ -144,7 +144,20 @@ class KeysTab(ctk.CTkFrame):
             text_color="#374151",
             command=lambda k=key_id: self._test_provider_key(k),
         )
-        btn_test.pack(side="right", padx=(0, 8))
+        btn_test.pack(side="right", padx=(0, 4))
+
+        btn_limits = ctk.CTkButton(
+            header,
+            text="Limits",
+            width=58,
+            height=24,
+            font=theme.FONT_SMALL,
+            fg_color="#F3F4F6",
+            hover_color="#E5E7EB",
+            text_color="#374151",
+            command=lambda k=key_id, l=label_text: self._open_limits_inspector(k, l),
+        )
+        btn_limits.pack(side="right", padx=(0, 6))
 
         # Input Row: Single-line Compact Entry + Pool Editor button
         input_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -542,3 +555,125 @@ class KeysTab(ctk.CTkFrame):
             self.cust_status_badge.configure(text="Erased", text_color="#64748B")
             self._update_all_pool_badges()
             messagebox.showinfo("Keys Erased", "All API keys have been wiped.")
+
+    def _open_limits_inspector(self, key_id: str, label_text: str):
+        """Open rich Rate Limits & Quota Inspector dialog for a specific provider."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"API Rate Limits & Quotas — {label_text}")
+        dialog.geometry("540x510")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Header card
+        header = ctk.CTkFrame(dialog, fg_color=theme.COLOR_CARD_ALT, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
+        header.pack(fill="x", padx=16, pady=(16, 10))
+
+        h_top = ctk.CTkFrame(header, fg_color="transparent")
+        h_top.pack(fill="x", padx=14, pady=(10, 4))
+
+        title = ctk.CTkLabel(h_top, text=f"⚡ {label_text}", font=theme.FONT_HEADING, text_color=theme.COLOR_TEXT_MAIN)
+        title.pack(side="left")
+
+        pool = key_pools.get_pool(key_id)
+        stats = pool.get_stats()
+        key_count = stats["total_keys"]
+        key_status_text = f"{key_count} Keys in Pool" if key_count > 1 else ("1 Key Configured" if key_count == 1 else "No Key")
+        badge = ctk.CTkLabel(h_top, text=key_status_text, font=theme.FONT_BADGE, text_color=theme.COLOR_TEXT_DIM)
+        badge.pack(side="right")
+
+        active_k = pool.get_active_key()
+        masked_key = active_k.get_masked() if active_k else "None configured"
+        desc = ctk.CTkLabel(
+            header,
+            text=f"Active Key: {masked_key} • Pool Health: {stats['active_keys']} Active, {stats['cooldown_keys']} Cooldown",
+            font=theme.FONT_SMALL,
+            text_color=theme.COLOR_TEXT_MUTED
+        )
+        desc.pack(anchor="w", padx=14, pady=(0, 10))
+
+        # Content frame
+        content = ctk.CTkFrame(dialog, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=16, pady=4)
+
+        loading_lbl = ctk.CTkLabel(content, text="Querying provider quota and rate limits...", font=theme.FONT_BODY, text_color=theme.COLOR_TEXT_MUTED)
+        loading_lbl.pack(pady=30)
+
+        def populate(quota_data: Dict[str, Any]):
+            loading_lbl.pack_forget()
+
+            # Rate Limits Section
+            rl_card = ctk.CTkFrame(content, fg_color=theme.COLOR_CARD, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
+            rl_card.pack(fill="x", pady=6)
+
+            rl_header = ctk.CTkLabel(rl_card, text="Rate Limits & Quota Telemetry", font=theme.FONT_BODY_BOLD, text_color=theme.COLOR_TEXT_MAIN)
+            rl_header.pack(anchor="w", padx=14, pady=(8, 4))
+
+            limits = quota_data.get("limits", {})
+            req_rem = limits.get("req_remaining")
+            req_lim = limits.get("req_limit")
+            tok_rem = limits.get("tok_remaining")
+            tok_lim = limits.get("tok_limit")
+            req_reset = limits.get("req_reset")
+            tok_reset = limits.get("tok_reset")
+
+            info_text = quota_data.get("info", "")
+            if info_text:
+                info_lbl = ctk.CTkLabel(rl_card, text=info_text, font=theme.FONT_SMALL, text_color=theme.COLOR_TEXT_MUTED, justify="left", wraplength=480)
+                info_lbl.pack(anchor="w", padx=14, pady=(0, 8))
+
+            if req_rem or req_lim:
+                req_frame = ctk.CTkFrame(rl_card, fg_color="transparent")
+                req_frame.pack(fill="x", padx=14, pady=(0, 6))
+                r_lbl = ctk.CTkLabel(req_frame, text=f"Requests Remaining: {req_rem or 'N/A'} / {req_lim or 'N/A'}", font=theme.FONT_BODY, text_color=theme.COLOR_TEXT_MAIN)
+                r_lbl.pack(side="left")
+                if req_reset:
+                    res_lbl = ctk.CTkLabel(req_frame, text=f"Reset in: {req_reset}s", font=theme.FONT_SMALL, text_color=theme.COLOR_TEXT_DIM)
+                    res_lbl.pack(side="right")
+
+            if tok_rem or tok_lim:
+                tok_frame = ctk.CTkFrame(rl_card, fg_color="transparent")
+                tok_frame.pack(fill="x", padx=14, pady=(0, 8))
+                t_lbl = ctk.CTkLabel(tok_frame, text=f"Tokens Remaining: {tok_rem or 'N/A'} / {tok_lim or 'N/A'}", font=theme.FONT_BODY, text_color=theme.COLOR_TEXT_MAIN)
+                t_lbl.pack(side="left")
+                if tok_reset:
+                    res2_lbl = ctk.CTkLabel(tok_frame, text=f"Reset in: {tok_reset}s", font=theme.FONT_SMALL, text_color=theme.COLOR_TEXT_DIM)
+                    res2_lbl.pack(side="right")
+
+            # Account Balance Section
+            bal = quota_data.get("balance")
+            if bal:
+                bal_card = ctk.CTkFrame(content, fg_color=theme.COLOR_CARD, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
+                bal_card.pack(fill="x", pady=6)
+
+                b_head = ctk.CTkLabel(bal_card, text="Account Balance & Credit Usage", font=theme.FONT_BODY_BOLD, text_color=theme.COLOR_TEXT_MAIN)
+                b_head.pack(anchor="w", padx=14, pady=(8, 4))
+
+                b_val = ctk.CTkLabel(bal_card, text=f"Balance: {bal}", font=theme.FONT_BODY, text_color=theme.COLOR_ACCENT)
+                b_val.pack(anchor="w", padx=14, pady=(0, 8))
+
+            # Free Models Status
+            free_card = ctk.CTkFrame(content, fg_color=theme.COLOR_CARD, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
+            free_card.pack(fill="x", pady=6)
+
+            is_free = quota_data.get("is_free", False) or is_model_free(key_id, "")
+            status_symbol = "✓" if is_free else "ℹ"
+            status_text = "This provider has 100% Free / Free-Tier models available in OmniAI Studio." if is_free else "This provider uses standard pay-per-token pricing."
+
+            f_lbl = ctk.CTkLabel(free_card, text=f"{status_symbol} {status_text}", font=theme.FONT_SMALL, text_color="#059669" if is_free else theme.COLOR_TEXT_MUTED, wraplength=480, justify="left")
+            f_lbl.pack(anchor="w", padx=14, pady=8)
+
+        def query():
+            data = engine.check_provider_balance_and_limits(key_id)
+            try:
+                dialog.after(0, lambda: populate(data))
+            except Exception:
+                pass
+
+        threading.Thread(target=query, daemon=True).start()
+
+        # Bottom buttons
+        btn_bar = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_bar.pack(fill="x", padx=16, pady=(8, 16))
+
+        btn_close = ctk.CTkButton(btn_bar, text="Close", width=80, fg_color=theme.COLOR_CARD_HOVER, hover_color=theme.COLOR_BORDER, text_color=theme.COLOR_TEXT_MAIN, command=dialog.destroy)
+        btn_close.pack(side="right")
