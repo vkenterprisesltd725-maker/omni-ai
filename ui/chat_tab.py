@@ -352,16 +352,16 @@ class ChatTab(ctk.CTkFrame):
         )
         self.top_bar.pack(fill="x", padx=14, pady=(12, 6))
 
-        # Three-line Hamburger menu button (☰) to toggle History drawer
+        # History drawer toggle button
         self.btn_history_menu = ctk.CTkButton(
             self.top_bar,
-            text="☰",
-            width=36,
+            text="🕘 History",
+            width=78,
             height=28,
-            font=("Segoe UI Symbol", 15, "bold"),
-            fg_color="#F3F4F6",
-            hover_color="#E5E7EB",
-            text_color="#1F2937",
+            font=theme.FONT_SMALL,
+            fg_color=theme.COLOR_CARD_HOVER,
+            hover_color=theme.COLOR_BORDER,
+            text_color=theme.COLOR_TEXT_MAIN,
             corner_radius=6,
             command=self._toggle_history_sidebar,
         )
