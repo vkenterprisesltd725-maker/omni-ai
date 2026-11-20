@@ -38,7 +38,15 @@ PROVIDERS = {
         "id": "gemini",
         "type": "gemini",
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
-        "models": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.0-flash-exp"],
+        "models": [
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-thinking-exp",
+            "gemini-2.0-pro-exp",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-1.5-flash-8b",
+            "gemini-2.0-flash-exp"
+        ],
         "key_hint": "AIzaSy... (Supports multiple keys)",
         "has_chat": True,
         "has_image": False,
@@ -238,6 +246,51 @@ def is_model_free(provider_str: str, model_id: str, openrouter_free_set: Optiona
         return True
 
     return False
+
+
+def filter_latest_gemini_models(models: List[str]) -> List[str]:
+    """Filter Gemini models list to only latest, active, and available generation models."""
+    excluded = (
+        "gemini-1.0", "gemini-pro-vision", "text-embedding", "embedding",
+        "aqa", "imagen", "-001", "-002", "-latest", "-tuning", "vision-latest",
+        "learnlm", "-exp-08", "-exp-09", "-exp-10", "-exp-11"
+    )
+
+    preferred_order = [
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-thinking-exp",
+        "gemini-2.0-pro-exp",
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash-8b",
+        "gemini-exp-1206",
+    ]
+
+    clean_list = []
+    for m in models:
+        clean = m.replace("models/", "").strip()
+        if not clean.startswith("gemini-"):
+            continue
+        if clean in ("gemini-pro", "gemini-pro-vision"):
+            continue
+        if any(ex in clean for ex in excluded):
+            continue
+        clean_list.append(clean)
+
+    sorted_result = []
+    for pref in preferred_order:
+        matches = [m for m in clean_list if m == pref or m.startswith(pref)]
+        for match in matches:
+            if match not in sorted_result:
+                sorted_result.append(match)
+
+    for m in clean_list:
+        if m not in sorted_result:
+            sorted_result.append(m)
+
+    return sorted_result
 
 
 class AIEngine:
@@ -1193,13 +1246,16 @@ class AIEngine:
                 resp = self.session.get(f"{base_url}/models?key={api_key}", timeout=10)
                 if resp.status_code == 200:
                     data = resp.json().get("models", [])
-                    fetched = [
+                    raw_names = [
                         m.get("name", "").replace("models/", "")
                         for m in data
                         if "generateContent" in str(m.get("supportedGenerationMethods", []))
                     ]
-                    if fetched:
-                        return sorted(fetched)
+                    filtered = filter_latest_gemini_models(raw_names)
+                    if filtered:
+                        return filtered
+                    elif raw_names:
+                        return sorted(raw_names)
                 elif resp.status_code in (400, 401, 403):
                     return []
 
