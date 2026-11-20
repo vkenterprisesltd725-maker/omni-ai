@@ -25,25 +25,43 @@ def upload_release():
 
     repo_owner = "vkenterprisesltd725-maker"
     repo_name = "omni-ai"
-    tag_name = "v2.2.0"
-    release_title = "OmniAI Studio v2.2.0 — Silky Smooth Streaming & Compact Key Pools"
+    tag_name = "v2.3.0"
+    release_title = "OmniAI Studio v2.3.0 — Animated Menu Drawer, Dual Dark/Light Mode & Real-Time Model Detection"
 
-    release_body = """## ⚡ OmniAI Studio v2.2.0 (Built by VIKA-BUILDS)
+    release_body = """## ⚡ OmniAI Studio v2.3.0 (Built by VIKA-BUILDS)
 
 Universal AI Desktop Studio & Local OpenAI-Compatible REST API Gateway with Multi-Key Auto-Failover.
 
 ---
 
-### 🚀 Key Improvements in v2.2.0
-- **Silky Smooth Real-Time Streaming (Zero Lag / No Freezing)**:
-  - Engineered high-performance thread-safe token buffering with a 28 FPS throttled GUI flush loop.
-  - Completely eliminates Tkinter event loop flooding and Windows `(Not Responding)` freeze states on ultra-fast models (Groq, Cerebras, OpenRouter, Gemini).
-- **Redesigned Compact API Keys Tab**:
-  - Replaced oversized multi-line boxes with sleek, compact single-line key inputs (~58px card height, over 55% space reduction).
-  - Clean view showing all provider pools at a glance without endless scrolling.
-  - Integrated dedicated **Pool Editor Modal** for pasting multiple keys line-by-line for automatic rate-limit failover rotation.
-- **Enhanced Window Wrapping & Typography**:
-  - Optimized response label wraplength and smooth auto-scrolling.
+### 🚀 What's New in v2.3.0
+
+- **🎭 Animated Slide-In Navigation Drawer (`☰`)**:
+  - Replaced the permanent fixed sidebar with a sleek, minimalist hamburger menu button (`☰`) in the top-left header.
+  - Smooth slide-in/out drawer with ease-out physics (~120ms duration) inspired by Claude.com & Linear design.
+  - When closed, your workspace expands to **100% full-width view** for immersive chat and canvas workflows.
+  - Supports dimming backdrop click-to-dismiss, top `✕` close button, and `Esc` key shortcut.
+
+- **🌓 Dual Obsidian Dark / Monochrome Light Mode**:
+  - Replaced the static theme button in the top-right header with an interactive `🌙 Dark` $\\leftrightarrow$ `☀️ Light` toggle pill.
+  - Complete dual-mode color architecture across all components: buttons, cards, inputs, tabs, and conversation bubbles.
+  - Instant appearance mode transitions with high-contrast text and crisp borders.
+
+- **⚡ Dynamic Real-Time Model Detection**:
+  - Live query API key validation across providers (OpenAI, Anthropic, Gemini, Groq, Cerebras, OpenRouter, Mistral, Perplexity).
+  - Fetches and displays currently active and available models for your specific key directly in the Chat dropdown.
+  - Instant status feedback with clean badge indicators.
+
+- **💬 Modernized Chat Controls & Actions**:
+  - **Unified Send / Stop Button**: Context-aware dynamic state transition (displays Send icon `➤` when idle, and active Stop icon `⏹` while streaming responses).
+  - **Message Actions**: Added hover **Copy** (`📋`) and **Edit** (`✏️`) buttons for sent prompts to quickly iterate on conversations.
+  - **Collapsible History Drawer**: Dedicated `🕘 History` drawer button in the chat header to keep conversation logs easily accessible without cluttering your chat stream.
+
+- **🐙 Developer Contact Card**:
+  - Quick-access social links embedded in the drawer footer:
+    - **GitHub**: [github.com/vkenterprisesltd725-maker](https://github.com/vkenterprisesltd725-maker)
+    - **Instagram**: [instagram.com/vikaskhatik725](https://instagram.com/vikaskhatik725)
+  - Right-click customization to save your own developer handle and links.
 
 ---
 
@@ -51,8 +69,8 @@ Universal AI Desktop Studio & Local OpenAI-Compatible REST API Gateway with Mult
 
 | Download | File Size | Description |
 | :--- | :--- | :--- |
-| **🚀 [OmniAI_Studio_Setup.exe](https://github.com/vkenterprisesltd725-maker/omni-ai/releases/download/v2.2.0/OmniAI_Studio_Setup.exe)** | ~70 MB | **Standard Windows Installer** (Recommended). Installs into `%LOCALAPPDATA%\\Programs\\OmniAI_Studio`, adds Desktop & Start Menu shortcuts, registers in Windows Installed Apps, and permanently stores user data & keys. |
-| **🧳 [OmniAI_Studio_Portable.exe](https://github.com/vkenterprisesltd725-maker/omni-ai/releases/download/v2.2.0/OmniAI_Studio_Portable.exe)** | ~41 MB | **100% Standalone Portable**. Carry on USB or external drive. No installation required. Runs anywhere. |
+| **🚀 [OmniAI_Studio_Setup.exe](https://github.com/vkenterprisesltd725-maker/omni-ai/releases/download/v2.3.0/OmniAI_Studio_Setup.exe)** | ~70 MB | **Standard Windows Installer** (Recommended). Installs into `%LOCALAPPDATA%\\Programs\\OmniAI_Studio`, creates Desktop & Start Menu shortcuts, registers in Windows Installed Apps, and preserves user data & keys. |
+| **🧳 [OmniAI_Studio_Portable.exe](https://github.com/vkenterprisesltd725-maker/omni-ai/releases/download/v2.3.0/OmniAI_Studio_Portable.exe)** | ~41 MB | **100% Standalone Portable**. Carry on USB or external drive. No installation required. Runs anywhere. |
 """
 
     headers = {
@@ -74,7 +92,8 @@ Universal AI Desktop Studio & Local OpenAI-Compatible REST API Gateway with Mult
             "name": release_title,
             "body": release_body,
             "draft": False,
-            "prerelease": False
+            "prerelease": False,
+            "make_latest": "true"
         }
         requests.patch(f"{release_url}/{release_id}", headers=headers, json=patch_payload)
     else:
@@ -84,7 +103,8 @@ Universal AI Desktop Studio & Local OpenAI-Compatible REST API Gateway with Mult
             "name": release_title,
             "body": release_body,
             "draft": False,
-            "prerelease": False
+            "prerelease": False,
+            "make_latest": "true"
         }
         create_resp = requests.post(release_url, headers=headers, json=payload)
         if create_resp.status_code not in [200, 201]:
