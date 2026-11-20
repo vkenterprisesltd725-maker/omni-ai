@@ -1,7 +1,8 @@
 """
 OmniAI Studio - Multi-Key Pools & Auto-Failover Manager
 Engineered by VIKA-BUILDS.
-Configure multiple API keys per provider with automatic rate limit failover rotation.
+Configure API keys or key pools with automatic rate limit failover rotation.
+Compact, space-efficient design.
 """
 
 import os
@@ -17,239 +18,408 @@ from key_pool import key_pools
 import ui.theme as theme
 
 KEY_ITEMS = [
-    ("openai", "OpenAI Keys (GPT-4o / DALL-E)", "sk-proj-... or sk-... (One key per line)"),
-    ("gemini", "Google Gemini Keys (1.5 & 2.0)", "AIzaSy... (One key per line)"),
-    ("claude", "Anthropic Claude Keys", "sk-ant-api03-... (One key per line)"),
-    ("groq", "Groq Keys (Llama 3.3 Free)", "gsk_... (One key per line)"),
-    ("deepseek", "DeepSeek Keys (V3 & R1)", "sk-... (One key per line)"),
-    ("openrouter", "OpenRouter Keys (300+ Models)", "sk-or-v1-... (One key per line)"),
-    ("mistral", "Mistral AI Keys", "from console.mistral.ai"),
-    ("stability", "Stability AI Keys (SD3 / Core)", "sk-... (from platform.stability.ai)"),
-    ("replicate", "Replicate Keys (FLUX & Video)", "r8_... (from replicate.com/account)")
+    ("openai", "OpenAI (GPT-4o / DALL-E)", "sk-proj-... or sk-..."),
+    ("gemini", "Google Gemini (1.5 & 2.0)", "AIzaSy..."),
+    ("claude", "Anthropic Claude (3.5 & 3.7)", "sk-ant-api03-..."),
+    ("groq", "Groq (Llama 3.3 Free & Fast)", "gsk_..."),
+    ("deepseek", "DeepSeek (V3 & R1)", "sk-..."),
+    ("openrouter", "OpenRouter (300+ Models)", "sk-or-v1-..."),
+    ("mistral", "Mistral AI", "from console.mistral.ai"),
+    ("stability", "Stability AI (SD3 / Core)", "sk-... (from platform.stability.ai)"),
+    ("replicate", "Replicate (FLUX & Video)", "r8_... (from replicate.com)")
 ]
+
 
 class KeysTab(ctk.CTkFrame):
     def __init__(self, master, status_callback=None):
         super().__init__(master, fg_color="transparent")
         self.status_callback = status_callback
 
-        self.key_textboxes: Dict[str, ctk.CTkTextbox] = {}
+        self.key_entries: Dict[str, ctk.CTkEntry] = {}
         self.key_status_badges: Dict[str, ctk.CTkLabel] = {}
         self.pool_badges: Dict[str, ctk.CTkLabel] = {}
 
         self._build_ui()
         self._update_all_pool_badges()
 
+    @property
+    def key_textboxes(self):
+        """Backward-compatibility alias."""
+        return self.key_entries
+
     def _build_ui(self):
         self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.scroll_frame.pack(fill="both", expand=True, padx=14, pady=12)
+        self.scroll_frame.pack(fill="both", expand=True, padx=12, pady=8)
 
-        # Header Card
-        banner = ctk.CTkFrame(self.scroll_frame, fg_color=theme.COLOR_CARD_ALT, corner_radius=10, border_width=1, border_color=theme.COLOR_BORDER)
-        banner.pack(fill="x", padx=10, pady=(0, 12))
+        # Compact Header Banner
+        banner = ctk.CTkFrame(
+            self.scroll_frame,
+            fg_color=theme.COLOR_CARD_ALT,
+            corner_radius=8,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+        )
+        banner.pack(fill="x", padx=8, pady=(0, 8))
 
-        b_title = ctk.CTkLabel(banner, text="Multi-Key Pools & Auto-Failover", font=theme.FONT_HEADING, text_color=theme.COLOR_TEXT_MAIN)
-        b_title.pack(anchor="w", padx=18, pady=(14, 4))
+        b_title = ctk.CTkLabel(
+            banner,
+            text="API Keys & Multi-Key Failover Pools",
+            font=theme.FONT_HEADING,
+            text_color=theme.COLOR_TEXT_MAIN,
+        )
+        b_title.pack(anchor="w", padx=14, pady=(8, 2))
 
         b_desc = ctk.CTkLabel(
             banner,
-            text="Add MULTIPLE API keys for any model (one key per line or comma-separated).\nWhen one key reaches its rate limit (HTTP 429 or quota exceeded), the engine rotates to the next key automatically.\nAll keys are locally obfuscated and saved in 'portable_config.json' beside the executable.",
-            font=theme.FONT_BODY,
+            text=(
+                "Enter API keys below. For rate-limit failover (HTTP 429), separate multiple keys "
+                "with commas or click 'Pool...' for the multi-line editor. All keys are encrypted locally."
+            ),
+            font=theme.FONT_SMALL,
             text_color=theme.COLOR_TEXT_MUTED,
-            justify="left"
+            justify="left",
         )
-        b_desc.pack(anchor="w", padx=18, pady=(0, 14))
+        b_desc.pack(anchor="w", padx=14, pady=(0, 8))
 
-        # Providers Key Cards
+        # Compact Provider Key Cards
         for key_id, label_text, hint in KEY_ITEMS:
             self._create_provider_card(key_id, label_text, hint)
 
         # Custom Endpoint Section
         self._create_custom_endpoint_section()
 
-        # Action Buttons
+        # Action Toolbar
         self._create_actions_bar()
 
     def _create_provider_card(self, key_id: str, label_text: str, hint: str):
-        card = ctk.CTkFrame(self.scroll_frame, fg_color=theme.COLOR_CARD, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
-        card.pack(fill="x", padx=10, pady=6)
+        card = ctk.CTkFrame(
+            self.scroll_frame,
+            fg_color=theme.COLOR_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+        )
+        card.pack(fill="x", padx=8, pady=3)
 
-        # Card Header
+        # Header Row: Provider Name | Pool Badge | Test Button | Status
         header = ctk.CTkFrame(card, fg_color="transparent")
-        header.pack(fill="x", padx=14, pady=(10, 4))
+        header.pack(fill="x", padx=12, pady=(6, 2))
 
-        lbl = ctk.CTkLabel(header, text=label_text, font=theme.FONT_BODY_BOLD, text_color=theme.COLOR_TEXT_MAIN)
+        lbl = ctk.CTkLabel(
+            header,
+            text=label_text,
+            font=theme.FONT_BODY_BOLD,
+            text_color=theme.COLOR_TEXT_MAIN,
+        )
         lbl.pack(side="left")
 
-        pool_badge = ctk.CTkLabel(header, text="0 Keys", font=theme.FONT_BADGE, text_color="#94A3B8")
-        pool_badge.pack(side="left", padx=12)
+        pool_badge = ctk.CTkLabel(
+            header,
+            text="0 Keys",
+            font=theme.FONT_BADGE,
+            text_color="#94A3B8",
+        )
+        pool_badge.pack(side="left", padx=8)
         self.pool_badges[key_id] = pool_badge
 
-        badge = ctk.CTkLabel(header, text="Untested", font=theme.FONT_BADGE, text_color="#64748B", width=120)
+        badge = ctk.CTkLabel(
+            header,
+            text="Untested",
+            font=theme.FONT_BADGE,
+            text_color="#64748B",
+            width=110,
+            anchor="e",
+        )
         badge.pack(side="right")
         self.key_status_badges[key_id] = badge
 
         btn_test = ctk.CTkButton(
             header,
-            text="Test Pool",
-            width=85,
-            height=26,
+            text="Test",
+            width=65,
+            height=24,
             font=theme.FONT_SMALL,
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
-            command=lambda k=key_id: self._test_provider_key(k)
+            command=lambda k=key_id: self._test_provider_key(k),
         )
-        btn_test.pack(side="right", padx=8)
+        btn_test.pack(side="right", padx=(0, 8))
 
-        # Multi-line Textbox for Keys
+        # Input Row: Single-line Compact Entry + Pool Editor button
+        input_row = ctk.CTkFrame(card, fg_color="transparent")
+        input_row.pack(fill="x", padx=12, pady=(2, 6))
+
         saved_keys = cfg.get_keys(key_id)
-        saved_str = "\n".join(saved_keys)
+        saved_str = ", ".join(saved_keys)
 
-        txt = ctk.CTkTextbox(
-            card,
-            height=65,
+        entry = ctk.CTkEntry(
+            input_row,
+            height=28,
             font=theme.FONT_CODE,
             fg_color=theme.COLOR_INPUT,
             border_width=1,
             border_color=theme.COLOR_BORDER,
             corner_radius=6,
-            wrap="none"
+            placeholder_text=f"Enter key or multiple comma-separated keys ({hint})",
         )
         if saved_str:
-            txt.insert("1.0", saved_str)
-        txt.pack(fill="x", padx=14, pady=(2, 8))
-        self.key_textboxes[key_id] = txt
+            entry.insert(0, saved_str)
+        entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.key_entries[key_id] = entry
 
-        txt.bind("<KeyRelease>", lambda e, k=key_id: self._on_keys_text_changed(k))
+        entry.bind("<KeyRelease>", lambda e, k=key_id: self._on_keys_text_changed(k))
 
-        hint_lbl = ctk.CTkLabel(card, text=f"Tip: Enter 1 or more keys separated by newlines or commas. {hint}", font=theme.FONT_SMALL, text_color="#64748B")
-        hint_lbl.pack(anchor="w", padx=14, pady=(0, 8))
+        btn_pool = ctk.CTkButton(
+            input_row,
+            text="Pool...",
+            width=55,
+            height=28,
+            font=theme.FONT_SMALL,
+            fg_color="#F3F4F6",
+            hover_color="#E5E7EB",
+            text_color="#374151",
+            command=lambda k=key_id, l=label_text: self._open_pool_dialog(k, l),
+        )
+        btn_pool.pack(side="right")
 
-    def _on_keys_text_changed(self, key_id: str):
-        raw = self.key_textboxes[key_id].get("1.0", "end-1c")
-        keys = parse_keys_string(raw)
-        badge = self.pool_badges.get(key_id)
-        if badge:
-            if len(keys) == 0:
-                badge.configure(text="0 Keys Configured", text_color="#94A3B8")
-            elif len(keys) == 1:
-                badge.configure(text="1 Key Active 🟢", text_color=theme.COLOR_SUCCESS)
-            else:
-                badge.configure(text=f"🔄 {len(keys)} Keys Pool (Auto-Failover Active) 🟢", text_color=theme.COLOR_SUCCESS)
+    def _open_pool_dialog(self, key_id: str, label_text: str):
+        """Dedicated multi-line editor for multi-key failover pools."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Key Pool — {label_text}")
+        dialog.geometry("540x360")
+        dialog.transient(self)
+        dialog.grab_set()
 
-    def _update_all_pool_badges(self):
-        for key_id in self.key_textboxes:
+        lbl = ctk.CTkLabel(
+            dialog,
+            text=f"Manage Key Pool for {label_text}",
+            font=theme.FONT_HEADING,
+            text_color=theme.COLOR_TEXT_MAIN,
+        )
+        lbl.pack(anchor="w", padx=16, pady=(14, 2))
+
+        sub = ctk.CTkLabel(
+            dialog,
+            text="Paste 1 or more keys below (one key per line). When one key hits rate limits (HTTP 429), OmniAI automatically rotates to the next active key.",
+            font=theme.FONT_SMALL,
+            text_color=theme.COLOR_TEXT_MUTED,
+            justify="left",
+            wraplength=500,
+        )
+        sub.pack(anchor="w", padx=16, pady=(0, 8))
+
+        txt = ctk.CTkTextbox(
+            dialog,
+            font=theme.FONT_CODE,
+            fg_color=theme.COLOR_INPUT,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+            corner_radius=6,
+            wrap="none",
+        )
+        txt.pack(fill="both", expand=True, padx=16, pady=4)
+
+        current_raw = self.key_entries[key_id].get().strip()
+        keys_list = parse_keys_string(current_raw)
+        if keys_list:
+            txt.insert("1.0", "\n".join(keys_list))
+
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(8, 14))
+
+        def apply_pool():
+            content = txt.get("1.0", "end-1c")
+            keys = parse_keys_string(content)
+            self.key_entries[key_id].delete(0, "end")
+            self.key_entries[key_id].insert(0, ", ".join(keys))
             self._on_keys_text_changed(key_id)
+            dialog.destroy()
 
-    def _create_custom_endpoint_section(self):
-        card = ctk.CTkFrame(self.scroll_frame, fg_color=theme.COLOR_CARD, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
-        card.pack(fill="x", padx=10, pady=(10, 6))
+        btn_apply = ctk.CTkButton(
+            btn_row,
+            text="Apply Pool",
+            width=100,
+            height=30,
+            font=theme.FONT_BODY_BOLD,
+            fg_color=theme.COLOR_ACCENT,
+            hover_color=theme.COLOR_ACCENT_HOVER,
+            text_color="#FFFFFF",
+            command=apply_pool,
+        )
+        btn_apply.pack(side="right")
 
-        title = ctk.CTkLabel(card, text="Custom OpenAI-Compatible Endpoint (Ollama / LocalAI / LM Studio)", font=theme.FONT_BODY_BOLD, text_color=theme.COLOR_TEXT_MAIN)
-        title.pack(anchor="w", padx=16, pady=(10, 4))
-
-        cust = cfg.get_custom_endpoint()
-
-        row1 = ctk.CTkFrame(card, fg_color="transparent")
-        row1.pack(fill="x", padx=16, pady=4)
-        url_lbl = ctk.CTkLabel(row1, text="Base URL:", width=90, font=theme.FONT_SMALL, anchor="w", text_color=theme.COLOR_TEXT_MUTED)
-        url_lbl.pack(side="left")
-        self.cust_url_entry = ctk.CTkEntry(row1, font=theme.FONT_CODE, fg_color=theme.COLOR_INPUT, border_color=theme.COLOR_BORDER)
-        self.cust_url_entry.insert(0, cust.get("base_url", "http://localhost:11434/v1"))
-        self.cust_url_entry.pack(side="left", fill="x", expand=True)
-
-        row2 = ctk.CTkFrame(card, fg_color="transparent")
-        row2.pack(fill="x", padx=16, pady=4)
-        key_lbl = ctk.CTkLabel(row2, text="API Key:", width=90, font=theme.FONT_SMALL, anchor="w", text_color=theme.COLOR_TEXT_MUTED)
-        key_lbl.pack(side="left")
-        self.cust_key_entry = ctk.CTkEntry(row2, font=theme.FONT_CODE, fg_color=theme.COLOR_INPUT, border_color=theme.COLOR_BORDER, placeholder_text="Optional for local models")
-        self.cust_key_entry.insert(0, cust.get("api_key", ""))
-        self.cust_key_entry.pack(side="left", fill="x", expand=True)
-
-        row3 = ctk.CTkFrame(card, fg_color="transparent")
-        row3.pack(fill="x", padx=16, pady=(4, 12))
-        mod_lbl = ctk.CTkLabel(row3, text="Model Name:", width=90, font=theme.FONT_SMALL, anchor="w", text_color=theme.COLOR_TEXT_MUTED)
-        mod_lbl.pack(side="left")
-        self.cust_model_entry = ctk.CTkEntry(row3, font=theme.FONT_CODE, fg_color=theme.COLOR_INPUT, border_color=theme.COLOR_BORDER)
-        self.cust_model_entry.insert(0, cust.get("model_name", "llama3:latest"))
-        self.cust_model_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
-
-        btn_test_cust = ctk.CTkButton(
-            row3,
-            text="Test Endpoint",
-            width=110,
+        btn_cancel = ctk.CTkButton(
+            btn_row,
+            text="Cancel",
+            width=80,
             height=30,
             font=theme.FONT_SMALL,
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
-            command=self._test_custom_endpoint
+            command=dialog.destroy,
         )
-        btn_test_cust.pack(side="right")
+        btn_cancel.pack(side="right", padx=8)
 
-        self.cust_status_badge = ctk.CTkLabel(card, text="Untested", font=theme.FONT_BADGE, text_color="#64748B")
-        self.cust_status_badge.pack(anchor="e", padx=16, pady=(0, 8))
+    def _on_keys_text_changed(self, key_id: str):
+        entry = self.key_entries.get(key_id)
+        if not entry:
+            return
+        raw = entry.get()
+        keys = parse_keys_string(raw)
+        badge = self.pool_badges.get(key_id)
+        if badge:
+            if len(keys) == 0:
+                badge.configure(text="0 Keys", text_color="#94A3B8")
+            elif len(keys) == 1:
+                badge.configure(text="1 Key Active 🟢", text_color=theme.COLOR_SUCCESS)
+            else:
+                badge.configure(text=f"🔄 {len(keys)} Keys Pool (Auto-Failover) 🟢", text_color=theme.COLOR_SUCCESS)
+
+    def _update_all_pool_badges(self):
+        for key_id in self.key_entries:
+            self._on_keys_text_changed(key_id)
+
+    def _create_custom_endpoint_section(self):
+        card = ctk.CTkFrame(
+            self.scroll_frame,
+            fg_color=theme.COLOR_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+        )
+        card.pack(fill="x", padx=8, pady=(8, 4))
+
+        # Header Row
+        header = ctk.CTkFrame(card, fg_color="transparent")
+        header.pack(fill="x", padx=12, pady=(6, 2))
+
+        title = ctk.CTkLabel(
+            header,
+            text="Custom OpenAI-Compatible Endpoint (Ollama / LocalAI / LM Studio)",
+            font=theme.FONT_BODY_BOLD,
+            text_color=theme.COLOR_TEXT_MAIN,
+        )
+        title.pack(side="left")
+
+        self.cust_status_badge = ctk.CTkLabel(
+            header,
+            text="Untested",
+            font=theme.FONT_BADGE,
+            text_color="#64748B",
+            width=110,
+            anchor="e",
+        )
+        self.cust_status_badge.pack(side="right")
+
+        btn_test_cust = ctk.CTkButton(
+            header,
+            text="Test",
+            width=65,
+            height=24,
+            font=theme.FONT_SMALL,
+            fg_color="#F3F4F6",
+            hover_color="#E5E7EB",
+            text_color="#374151",
+            command=self._test_custom_endpoint,
+        )
+        btn_test_cust.pack(side="right", padx=(0, 8))
+
+        cust = cfg.get_custom_endpoint()
+
+        # Row 1: Base URL
+        row1 = ctk.CTkFrame(card, fg_color="transparent")
+        row1.pack(fill="x", padx=12, pady=2)
+        url_lbl = ctk.CTkLabel(row1, text="Base URL:", width=85, font=theme.FONT_SMALL, anchor="w", text_color=theme.COLOR_TEXT_MUTED)
+        url_lbl.pack(side="left")
+        self.cust_url_entry = ctk.CTkEntry(row1, height=28, font=theme.FONT_CODE, fg_color=theme.COLOR_INPUT, border_color=theme.COLOR_BORDER)
+        self.cust_url_entry.insert(0, cust.get("base_url", "http://localhost:11434/v1"))
+        self.cust_url_entry.pack(side="left", fill="x", expand=True)
+
+        # Row 2: API Key
+        row2 = ctk.CTkFrame(card, fg_color="transparent")
+        row2.pack(fill="x", padx=12, pady=2)
+        key_lbl = ctk.CTkLabel(row2, text="API Key:", width=85, font=theme.FONT_SMALL, anchor="w", text_color=theme.COLOR_TEXT_MUTED)
+        key_lbl.pack(side="left")
+        self.cust_key_entry = ctk.CTkEntry(row2, height=28, font=theme.FONT_CODE, fg_color=theme.COLOR_INPUT, border_color=theme.COLOR_BORDER, placeholder_text="Optional for local models")
+        self.cust_key_entry.insert(0, cust.get("api_key", ""))
+        self.cust_key_entry.pack(side="left", fill="x", expand=True)
+
+        # Row 3: Model Name
+        row3 = ctk.CTkFrame(card, fg_color="transparent")
+        row3.pack(fill="x", padx=12, pady=(2, 6))
+        mod_lbl = ctk.CTkLabel(row3, text="Model Name:", width=85, font=theme.FONT_SMALL, anchor="w", text_color=theme.COLOR_TEXT_MUTED)
+        mod_lbl.pack(side="left")
+        self.cust_model_entry = ctk.CTkEntry(row3, height=28, font=theme.FONT_CODE, fg_color=theme.COLOR_INPUT, border_color=theme.COLOR_BORDER)
+        self.cust_model_entry.insert(0, cust.get("model_name", "llama3:latest"))
+        self.cust_model_entry.pack(side="left", fill="x", expand=True)
 
     def _create_actions_bar(self):
-        actions = ctk.CTkFrame(self.scroll_frame, fg_color=theme.COLOR_CARD, corner_radius=8, border_width=1, border_color=theme.COLOR_BORDER)
-        actions.pack(fill="x", padx=10, pady=10)
+        actions = ctk.CTkFrame(
+            self.scroll_frame,
+            fg_color=theme.COLOR_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+        )
+        actions.pack(fill="x", padx=8, pady=8)
 
         btn_save_all = ctk.CTkButton(
             actions,
             text="Save All Key Pools",
             font=theme.FONT_BODY_BOLD,
-            height=36,
+            height=32,
             fg_color=theme.COLOR_ACCENT,
             hover_color=theme.COLOR_ACCENT_HOVER,
             text_color="#FFFFFF",
-            command=self._save_all_keys
+            command=self._save_all_keys,
         )
-        btn_save_all.pack(side="left", padx=12, pady=10)
+        btn_save_all.pack(side="left", padx=10, pady=8)
 
         btn_export = ctk.CTkButton(
             actions,
             text="Backup Config",
-            width=115,
-            height=36,
+            width=110,
+            height=32,
             font=theme.FONT_SMALL,
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
-            command=self._export_config
+            command=self._export_config,
         )
-        btn_export.pack(side="left", padx=4, pady=10)
+        btn_export.pack(side="left", padx=4, pady=8)
 
         btn_import = ctk.CTkButton(
             actions,
             text="Restore Config",
-            width=115,
-            height=36,
+            width=110,
+            height=32,
             font=theme.FONT_SMALL,
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
-            command=self._import_config
+            command=self._import_config,
         )
-        btn_import.pack(side="left", padx=4, pady=10)
+        btn_import.pack(side="left", padx=4, pady=8)
 
         btn_erase = ctk.CTkButton(
             actions,
             text="Erase All Keys",
-            width=125,
-            height=36,
+            width=115,
+            height=32,
             font=theme.FONT_SMALL,
             fg_color=theme.COLOR_ERROR,
             hover_color="#B91C1C",
             text_color="#FFFFFF",
-            command=self._erase_all_keys
+            command=self._erase_all_keys,
         )
-        btn_erase.pack(side="right", padx=12, pady=10)
+        btn_erase.pack(side="right", padx=10, pady=8)
 
     def _save_all_keys(self):
         total_keys_count = 0
-        for key_id, txt in self.key_textboxes.items():
-            raw = txt.get("1.0", "end-1c")
+        for key_id, entry in self.key_entries.items():
+            raw = entry.get()
             keys = parse_keys_string(raw)
             cfg.set_keys(key_id, keys)
             total_keys_count += len(keys)
@@ -257,16 +427,24 @@ class KeysTab(ctk.CTkFrame):
         cfg.set_custom_endpoint(
             base_url=self.cust_url_entry.get().strip(),
             api_key=self.cust_key_entry.get().strip(),
-            model_name=self.cust_model_entry.get().strip()
+            model_name=self.cust_model_entry.get().strip(),
         )
 
         self._update_all_pool_badges()
-        messagebox.showinfo("Saved", f"Successfully saved {total_keys_count} API keys across all key pools!")
+        messagebox.showinfo(
+            "Saved",
+            f"Successfully saved {total_keys_count} API keys across all key pools!",
+        )
         if self.status_callback:
-            self.status_callback(f"Saved {total_keys_count} keys with auto-failover ready.")
+            self.status_callback(
+                f"Saved {total_keys_count} keys with auto-failover ready."
+            )
 
     def _test_provider_key(self, key_id: str):
-        raw = self.key_textboxes[key_id].get("1.0", "end-1c")
+        entry = self.key_entries.get(key_id)
+        if not entry:
+            return
+        raw = entry.get()
         keys = parse_keys_string(raw)
         cfg.set_keys(key_id, keys)
 
@@ -282,7 +460,7 @@ class KeysTab(ctk.CTkFrame):
             "openrouter": "OpenRouter (300+ Models)",
             "mistral": "Mistral AI",
             "stability": "Stability AI",
-            "replicate": "Replicate"
+            "replicate": "Replicate",
         }
         prov_name = prov_map.get(key_id, "OpenAI (Official)")
 
@@ -296,13 +474,18 @@ class KeysTab(ctk.CTkFrame):
         cfg.set_custom_endpoint(
             base_url=self.cust_url_entry.get().strip(),
             api_key=self.cust_key_entry.get().strip(),
-            model_name=self.cust_model_entry.get().strip()
+            model_name=self.cust_model_entry.get().strip(),
         )
         self.cust_status_badge.configure(text="Testing...", text_color="#F59E0B")
 
         def run():
             success, latency, msg = engine.test_connection("Custom OpenAI Endpoint")
-            self.after(0, lambda: self._apply_test_result(self.cust_status_badge, success, latency, msg))
+            self.after(
+                0,
+                lambda: self._apply_test_result(
+                    self.cust_status_badge, success, latency, msg
+                ),
+            )
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -313,7 +496,9 @@ class KeysTab(ctk.CTkFrame):
             badge.configure(text=f"🔴 {msg[:25]}", text_color=theme.COLOR_ERROR)
 
     def _export_config(self):
-        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON Config", "*.json")])
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json", filetypes=[("JSON Config", "*.json")]
+        )
         if path:
             if cfg.export_to_file(path):
                 messagebox.showinfo("Export Successful", f"Backup saved to:\n{path}")
@@ -324,9 +509,9 @@ class KeysTab(ctk.CTkFrame):
         path = filedialog.askopenfilename(filetypes=[("JSON Config", "*.json")])
         if path and os.path.exists(path):
             if cfg.import_from_file(path):
-                for key_id, txt in self.key_textboxes.items():
-                    txt.delete("1.0", "end")
-                    txt.insert("1.0", "\n".join(cfg.get_keys(key_id)))
+                for key_id, entry in self.key_entries.items():
+                    entry.delete(0, "end")
+                    entry.insert(0, ", ".join(cfg.get_keys(key_id)))
                 cust = cfg.get_custom_endpoint()
                 self.cust_url_entry.delete(0, "end")
                 self.cust_url_entry.insert(0, cust.get("base_url", ""))
@@ -340,11 +525,16 @@ class KeysTab(ctk.CTkFrame):
                 messagebox.showerror("Import Failed", "Invalid configuration file.")
 
     def _erase_all_keys(self):
-        if messagebox.askyesno("Erase Keys", "Are you sure you want to erase ALL saved keys from this portable copy?"):
+        if messagebox.askyesno(
+            "Erase Keys",
+            "Are you sure you want to erase ALL saved keys from this portable copy?",
+        ):
             cfg.erase_all_keys()
-            for key_id, txt in self.key_textboxes.items():
-                txt.delete("1.0", "end")
-                self.key_status_badges[key_id].configure(text="Erased", text_color="#64748B")
+            for key_id, entry in self.key_entries.items():
+                entry.delete(0, "end")
+                self.key_status_badges[key_id].configure(
+                    text="Erased", text_color="#64748B"
+                )
             self.cust_key_entry.delete(0, "end")
             self.cust_status_badge.configure(text="Erased", text_color="#64748B")
             self._update_all_pool_badges()

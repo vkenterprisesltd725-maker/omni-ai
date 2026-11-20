@@ -19,7 +19,7 @@ import customtkinter as ctk
 
 APP_NAME = "OmniAI Studio"
 APP_EXE_NAME = "OmniAI_Studio.exe"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 APP_PUBLISHER = "VIKA-BUILDS"
 APP_DESCRIPTION = "Universal AI Desktop Studio & Local Gateway with Multi-Key Auto-Failover"
 
@@ -264,7 +264,7 @@ class InstallerGUI(ctk.CTk):
         title = ctk.CTkLabel(h_inner, text="OmniAI Studio Setup", font=("Segoe UI", 16, "bold"), text_color="#111827", anchor="w")
         title.pack(fill="x")
 
-        sub = ctk.CTkLabel(h_inner, text="Version 2.1 — Built by VIKA-BUILDS (Standard Windows Installation)", font=("Segoe UI", 10), text_color="#6B7280", anchor="w")
+        sub = ctk.CTkLabel(h_inner, text="Version 2.2 — Built by VIKA-BUILDS (Standard Windows Installation)", font=("Segoe UI", 10), text_color="#6B7280", anchor="w")
         sub.pack(fill="x")
 
         # Body area

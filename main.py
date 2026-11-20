@@ -120,7 +120,7 @@ class UniversalAIApp(ctk.CTk):
 
         lbl_ver = ctk.CTkLabel(
             brand_left,
-            text=" v2.1 PORTABLE " if IS_PORTABLE else " v2.1 ",
+            text=" v2.2 PORTABLE " if IS_PORTABLE else " v2.2 ",
             font=theme.FONT_BADGE,
             fg_color=theme.COLOR_CARD_HOVER,
             text_color=theme.COLOR_TEXT_MUTED,

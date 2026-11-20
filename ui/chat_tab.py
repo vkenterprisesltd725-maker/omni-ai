@@ -59,7 +59,17 @@ class ChatTab(ctk.CTkFrame):
         self.is_generating = False
         self.cancel_event = threading.Event()
         self.active_assistant_label: Optional[ctk.CTkLabel] = None
+        self.active_copy_btn: Optional[ctk.CTkButton] = None
         self.active_assistant_text = ""
+
+        # High-performance streaming buffer (eliminates Tkinter event flooding & UI freezes)
+        self._stream_buffer: List[str] = []
+        self._stream_lock = threading.Lock()
+        self._stream_timer: Optional[str] = None
+        self._stream_done_flag: bool = False
+        self._stream_done_full: str = ""
+        self._stream_err_flag: bool = False
+        self._stream_err_msg: str = ""
 
         # Chat history state
         self.current_conversation_id: Optional[str] = None
@@ -695,6 +705,18 @@ class ChatTab(ctk.CTkFrame):
 
     def _clear_chat(self):
         if messagebox.askyesno("Clear Chat", "Clear all messages from the conversation view?"):
+            if self.is_generating:
+                self.cancel_event.set()
+                self.is_generating = False
+            if self._stream_timer is not None:
+                try:
+                    self.after_cancel(self._stream_timer)
+                except Exception:
+                    pass
+                self._stream_timer = None
+            self.btn_send.configure(state="normal")
+            self.btn_stop.configure(state="disabled")
+
             self.messages.clear()
             self.current_conversation_id = None
             self.current_conversation_title = None
@@ -772,7 +794,7 @@ class ChatTab(ctk.CTkFrame):
         system_prompt = cfg.get_setting("system_prompt", "")
         temperature = float(self.temp_slider.get())
 
-        self.active_assistant_label, copy_btn = self._append_assistant_placeholder(
+        self.active_assistant_label, self.active_copy_btn = self._append_assistant_placeholder(
             provider, model,
         )
         self.active_assistant_text = ""
@@ -788,6 +810,40 @@ class ChatTab(ctk.CTkFrame):
         self._pending_model = model
         self._pending_provider = provider
 
+        # Clear stream buffer and flags
+        with self._stream_lock:
+            self._stream_buffer.clear()
+            self._stream_done_flag = False
+            self._stream_done_full = ""
+            self._stream_err_flag = False
+            self._stream_err_msg = ""
+
+        # Launch throttled drain loop (~28 FPS)
+        self._start_stream_drain_loop()
+
+        def on_chunk(chunk: str):
+            # Pure thread-safe buffer append — ZERO Tkinter event loop flooding!
+            with self._stream_lock:
+                self._stream_buffer.append(chunk)
+
+        def on_done(full: str):
+            with self._stream_lock:
+                self._stream_done_full = full
+                self._stream_done_flag = True
+            try:
+                self.after(0, self._drain_stream_buffer)
+            except Exception:
+                pass
+
+        def on_err(err: str):
+            with self._stream_lock:
+                self._stream_err_msg = err
+                self._stream_err_flag = True
+            try:
+                self.after(0, self._drain_stream_buffer)
+            except Exception:
+                pass
+
         def thread_target():
             engine.chat_stream(
                 provider_name=provider,
@@ -796,31 +852,94 @@ class ChatTab(ctk.CTkFrame):
                 system_prompt=system_prompt,
                 temperature=temperature,
                 image_path=img_attached,
-                callback_chunk=lambda chunk: self.after(0, self._on_stream_chunk, chunk),
-                callback_done=lambda full: self.after(
-                    0, self._on_stream_done, full, copy_btn,
-                ),
-                callback_err=lambda err: self.after(0, self._on_stream_err, err),
+                callback_chunk=on_chunk,
+                callback_done=on_done,
+                callback_err=on_err,
                 cancel_event=self.cancel_event,
             )
 
         threading.Thread(target=thread_target, daemon=True).start()
 
-    def _on_stream_chunk(self, chunk: str):
-        self.active_assistant_text += chunk
-        if self.active_assistant_label:
+    def _start_stream_drain_loop(self):
+        """Cancel any previous timer and start the frame-rate throttled UI updater."""
+        if self._stream_timer is not None:
+            try:
+                self.after_cancel(self._stream_timer)
+            except Exception:
+                pass
+            self._stream_timer = None
+        self._drain_stream_buffer()
+
+    def _drain_stream_buffer(self):
+        """Drain accumulated chunks at ~28 FPS. Keeps Windows message queue completely responsive."""
+        new_text = ""
+        done_flag = False
+        done_full = ""
+        err_flag = False
+        err_msg = ""
+
+        with self._stream_lock:
+            if self._stream_buffer:
+                new_text = "".join(self._stream_buffer)
+                self._stream_buffer.clear()
+            if self._stream_err_flag:
+                err_flag = True
+                err_msg = self._stream_err_msg
+                self._stream_err_flag = False
+            elif self._stream_done_flag:
+                done_flag = True
+                done_full = self._stream_done_full
+                self._stream_done_flag = False
+
+        if new_text and self.active_assistant_label:
+            self.active_assistant_text += new_text
             self.active_assistant_label.configure(text=self.active_assistant_text)
             self._scroll_to_bottom()
 
+        if err_flag:
+            self._on_stream_err(err_msg)
+            return
+
+        if done_flag:
+            self._on_stream_done(done_full, self.active_copy_btn)
+            return
+
+        if self.is_generating:
+            self._stream_timer = self.after(35, self._drain_stream_buffer)
+        else:
+            self._stream_timer = None
+
     def _on_stream_done(self, full_text: str, copy_btn: ctk.CTkButton):
         self.is_generating = False
+        if self._stream_timer is not None:
+            try:
+                self.after_cancel(self._stream_timer)
+            except Exception:
+                pass
+            self._stream_timer = None
+
         self.btn_send.configure(state="normal")
         self.btn_stop.configure(state="disabled")
 
-        if full_text:
+        # Flush any remaining chunks in the buffer
+        remaining = ""
+        with self._stream_lock:
+            if self._stream_buffer:
+                remaining = "".join(self._stream_buffer)
+                self._stream_buffer.clear()
+
+        if remaining:
+            self.active_assistant_text += remaining
+
+        final_text = full_text or self.active_assistant_text
+        if self.active_assistant_label and final_text:
+            self.active_assistant_label.configure(text=final_text)
+            self._scroll_to_bottom()
+
+        if final_text:
             msg_entry: Dict[str, Any] = {
                 "role": "assistant",
-                "content": full_text,
+                "content": final_text,
                 "model": getattr(self, "_pending_model", ""),
                 "provider": getattr(self, "_pending_provider", ""),
                 "timestamp": _iso_now(),
@@ -828,7 +947,7 @@ class ChatTab(ctk.CTkFrame):
             self.messages.append(msg_entry)
             copy_btn.configure(
                 state="normal",
-                command=lambda: self._copy_to_clipboard(full_text),
+                command=lambda: self._copy_to_clipboard(final_text),
             )
 
             # Auto-save conversation to disk
@@ -840,6 +959,13 @@ class ChatTab(ctk.CTkFrame):
 
     def _on_stream_err(self, err_text: str):
         self.is_generating = False
+        if self._stream_timer is not None:
+            try:
+                self.after_cancel(self._stream_timer)
+            except Exception:
+                pass
+            self._stream_timer = None
+
         self.btn_send.configure(state="normal")
         self.btn_stop.configure(state="disabled")
         if self.active_assistant_label:
@@ -847,6 +973,10 @@ class ChatTab(ctk.CTkFrame):
                 text=f"Error: {err_text}",
                 text_color=theme.COLOR_ERROR,
             )
+            self._scroll_to_bottom()
+        self._update_failover_telemetry()
+        if self.status_callback:
+            self.status_callback(f"Error: {err_text[:60]}")
         self._update_failover_telemetry()
         if self.status_callback:
             self.status_callback(f"Error: {err_text[:60]}")
@@ -949,7 +1079,7 @@ class ChatTab(ctk.CTkFrame):
                 font=theme.FONT_BODY,
                 text_color=theme.COLOR_TEXT_MAIN,
                 justify="left",
-                wraplength=620,
+                wraplength=680,
             )
             content_lbl.pack(anchor="w", padx=12, pady=(2, 10))
 
@@ -1022,7 +1152,7 @@ class ChatTab(ctk.CTkFrame):
             font=theme.FONT_BODY,
             text_color=theme.COLOR_TEXT_MAIN,
             justify="left",
-            wraplength=620,
+            wraplength=680,
         )
         content_lbl.pack(anchor="w", padx=12, pady=(4, 10))
 
@@ -1035,6 +1165,18 @@ class ChatTab(ctk.CTkFrame):
 
     def _new_chat(self):
         """Start a fresh conversation."""
+        if self.is_generating:
+            self.cancel_event.set()
+            self.is_generating = False
+        if self._stream_timer is not None:
+            try:
+                self.after_cancel(self._stream_timer)
+            except Exception:
+                pass
+            self._stream_timer = None
+        self.btn_send.configure(state="normal")
+        self.btn_stop.configure(state="disabled")
+
         self.messages.clear()
         self.current_conversation_id = None
         self.current_conversation_title = None

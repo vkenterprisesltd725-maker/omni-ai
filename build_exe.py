@@ -129,7 +129,7 @@ def package_and_cleanup(app_exe: str, installer_exe: str):
     with open(os.path.join(portable_folder, "portable.mode"), "w") as f:
         f.write("OmniAI Studio Portable Mode Marker\n")
     with open(os.path.join(portable_folder, "README.txt"), "w", encoding="utf-8") as f:
-        f.write("OmniAI Studio - Portable Edition (v2.1)\n"
+        f.write("OmniAI Studio - Portable Edition (v2.2)\n"
                 "Engineered by VIKA-BUILDS.\n\n"
                 "HOW TO USE:\n"
                 "1. Double-click 'OmniAI_Studio_Portable.exe' to run anywhere.\n"
