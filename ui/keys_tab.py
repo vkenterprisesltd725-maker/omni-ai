@@ -234,6 +234,8 @@ class KeysTab(ctk.CTkFrame):
             self.key_entries[key_id].delete(0, "end")
             self.key_entries[key_id].insert(0, ", ".join(keys))
             self._on_keys_text_changed(key_id)
+            cfg.set_keys(key_id, keys)
+            key_pools.emit_event("keys_updated", key_id, {"count": len(keys)})
             dialog.destroy()
 
         btn_apply = ctk.CTkButton(
@@ -431,6 +433,7 @@ class KeysTab(ctk.CTkFrame):
         )
 
         self._update_all_pool_badges()
+        key_pools.emit_event("keys_updated", "all", {"count": total_keys_count})
         messagebox.showinfo(
             "Saved",
             f"Successfully saved {total_keys_count} API keys across all key pools!",

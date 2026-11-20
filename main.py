@@ -300,6 +300,11 @@ class UniversalAIApp(ctk.CTk):
         for t_id, frame in self.tab_frames.items():
             if t_id == tab_id:
                 frame.tkraise()
+                if hasattr(frame, "on_tab_visible"):
+                    try:
+                        frame.on_tab_visible()
+                    except Exception:
+                        pass
                 self.nav_buttons[t_id].configure(
                     fg_color=theme.COLOR_CARD_HOVER,
                     border_width=0,
@@ -335,7 +340,8 @@ class UniversalAIApp(ctk.CTk):
         )
 
     def set_status(self, text: str):
-        self.status_label.configure(text=text)
+        if hasattr(self, "status_label"):
+            self.status_label.configure(text=text)
 
     def _on_close(self):
         try:

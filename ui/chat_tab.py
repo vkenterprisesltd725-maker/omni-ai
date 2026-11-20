@@ -284,23 +284,26 @@ class ChatTab(ctk.CTkFrame):
         mod_lbl.grid(row=0, column=2, padx=(12, 4), pady=8, sticky="w")
 
         self.model_combo = ctk.CTkComboBox(
-            self.top_bar, values=["loading..."], width=190,
+            self.top_bar, values=["Loading available models..."], width=200,
             fg_color=theme.COLOR_INPUT, border_color=theme.COLOR_BORDER,
+            command=self._on_model_change,
         )
         self.model_combo.grid(row=0, column=3, padx=4, pady=8, sticky="w")
 
-        # Discover button
-        self.btn_fetch = ctk.CTkButton(
+        # Refresh Live Models button (sleek icon button)
+        self.btn_refresh_models = ctk.CTkButton(
             self.top_bar,
-            text="Discover",
-            width=80,
-            font=theme.FONT_SMALL,
+            text="↻",
+            width=32,
+            height=28,
+            font=("Segoe UI Symbol", 13),
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
             command=self._fetch_models_threaded,
         )
-        self.btn_fetch.grid(row=0, column=4, padx=4, pady=8, sticky="w")
+        self.btn_refresh_models.grid(row=0, column=4, padx=(2, 4), pady=8, sticky="w")
+        self.btn_fetch = self.btn_refresh_models
 
         # Temperature
         temp_lbl = ctk.CTkLabel(
@@ -428,73 +431,95 @@ class ChatTab(ctk.CTkFrame):
         self.btn_row = ctk.CTkFrame(self.bottom_bar, fg_color="transparent")
         self.btn_row.pack(fill="x", padx=12, pady=(0, 10))
 
-        # Left buttons
+        # Left buttons: Attach (icon), Clear, Export
         self.btn_attach = ctk.CTkButton(
             self.btn_row,
-            text="Attach Image",
-            width=110,
+            text="📎",
+            width=36,
             height=32,
-            font=theme.FONT_SMALL,
+            font=("Segoe UI Symbol", 13),
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
+            corner_radius=8,
             command=self._attach_image_dialog,
         )
         self.btn_attach.pack(side="left", padx=(0, 6))
 
         self.btn_clear = ctk.CTkButton(
             self.btn_row,
-            text="Clear",
-            width=60,
+            text="🗑 Clear",
+            width=70,
             height=32,
             font=theme.FONT_SMALL,
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
+            corner_radius=8,
             command=self._clear_chat,
         )
         self.btn_clear.pack(side="left", padx=4)
 
         self.btn_export = ctk.CTkButton(
             self.btn_row,
-            text="Export",
-            width=65,
+            text="📥 Export",
+            width=75,
             height=32,
             font=theme.FONT_SMALL,
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
+            corner_radius=8,
             command=self._export_chat,
         )
         self.btn_export.pack(side="left", padx=4)
 
-        # Right buttons: Stop, Send
-        self.btn_stop = ctk.CTkButton(
+        # Right button: Single unified Action Button (Send <-> Stop)
+        self.btn_action = ctk.CTkButton(
             self.btn_row,
-            text="Stop",
-            width=60,
+            text="↑",
+            width=40,
             height=32,
-            font=theme.FONT_BODY_BOLD,
-            fg_color=theme.COLOR_ERROR,
-            hover_color="#B91C1C",
-            text_color="#FFFFFF",
-            state="disabled",
-            command=self._stop_generation,
-        )
-        self.btn_stop.pack(side="right", padx=(6, 0))
-
-        self.btn_send = ctk.CTkButton(
-            self.btn_row,
-            text="Send",
-            width=90,
-            height=32,
-            font=theme.FONT_BODY_BOLD,
+            font=("Segoe UI", 16, "bold"),
             fg_color=theme.COLOR_ACCENT,
             hover_color=theme.COLOR_ACCENT_HOVER,
             text_color="#FFFFFF",
-            command=self._send_message,
+            corner_radius=8,
+            command=self._on_action_click,
         )
-        self.btn_send.pack(side="right", padx=4)
+        self.btn_action.pack(side="right", padx=0)
+
+    @property
+    def btn_send(self):
+        return self.btn_action
+
+    @property
+    def btn_stop(self):
+        return self.btn_action
+
+    def _set_action_button_state(self, is_generating: bool):
+        if is_generating:
+            self.btn_action.configure(
+                text="■",
+                font=("Segoe UI", 13, "bold"),
+                fg_color=theme.COLOR_ERROR,
+                hover_color="#B91C1C",
+                state="normal"
+            )
+        else:
+            self.btn_action.configure(
+                text="↑",
+                font=("Segoe UI", 16, "bold"),
+                fg_color=theme.COLOR_ACCENT,
+                hover_color=theme.COLOR_ACCENT_HOVER,
+                state="normal"
+            )
+
+    def _on_action_click(self):
+        if self.is_generating:
+            self._stop_generation()
+        else:
+            self._send_message()
 
     # ===================================================================
     # WELCOME BANNER
@@ -532,18 +557,24 @@ class ChatTab(ctk.CTkFrame):
         desc.pack(anchor="w", padx=18, pady=(0, 14))
 
     # ===================================================================
-    # PROVIDER / MODEL SWITCHING
+    # PROVIDER / MODEL SWITCHING & REAL-TIME FETCHING
     # ===================================================================
 
     def _on_provider_change(self, choice: str):
         cfg.set_setting("active_provider", choice)
-        prov_info = PROVIDERS.get(choice, PROVIDERS.get("Custom OpenAI Endpoint", {}))
-        models = prov_info.get("models", [])
-        self.model_combo.configure(values=models)
-        if models:
-            self.model_combo.set(models[0])
-            cfg.set_setting("active_model", models[0])
         self._update_failover_telemetry()
+        self._fetch_models_threaded()
+
+    def _on_model_change(self, choice: str):
+        if choice and not any(choice.startswith(p) for p in ("No key", "Fetching", "No models", "Loading")):
+            cfg.set_setting("active_model", choice)
+
+    def on_tab_visible(self):
+        """Called whenever Chat tab is switched to; re-evaluates models if keys were updated."""
+        self._update_failover_telemetry()
+        curr = self.model_combo.get()
+        if not curr or any(curr.startswith(p) for p in ("No key", "No models", "Loading")):
+            self._fetch_models_threaded()
 
     # ===================================================================
     # TELEMETRY
@@ -593,9 +624,12 @@ class ChatTab(ctk.CTkFrame):
                 )
 
     def _on_key_failover_event(self, event: Dict[str, Any]):
-        if event.get("type") == "failover":
+        evt_type = event.get("type")
+        if evt_type in ("failover", "keys_updated"):
             self.after(0, self._update_failover_telemetry)
-            if self.status_callback:
+            if evt_type == "keys_updated":
+                self.after(0, self._fetch_models_threaded)
+            if self.status_callback and evt_type == "failover":
                 p = event.get("provider", "")
                 old_k = event.get("old_key", "")
                 new_k = event.get("new_key", "")
@@ -607,28 +641,68 @@ class ChatTab(ctk.CTkFrame):
                 )
 
     # ===================================================================
-    # FETCH MODELS
+    # REAL-TIME MODEL FETCHING
     # ===================================================================
 
     def _fetch_models_threaded(self):
         prov = self.provider_combo.get()
-        self.btn_fetch.configure(state="disabled", text="...")
+        prov_info = PROVIDERS.get(prov, PROVIDERS.get("Custom OpenAI Endpoint", {}))
+        prov_id = prov_info.get("id", "openai")
+
+        # Check if keys are entered for this provider
+        pool = key_pools.get_pool(prov_id)
+        has_key = bool(pool.get_active_key() or cfg.get_key(prov_id))
+        is_free = (prov_id == "pollinations")
+
+        if not has_key and not is_free:
+            # Show ONLY available models based on entered key -> 0 keys entered, so no models available
+            self.model_combo.configure(values=["No key entered (Add in Keys tab)"])
+            self.model_combo.set("No key entered (Add in Keys tab)")
+            if self.status_callback:
+                self.status_callback(f"No key for {prov}. Add your API key in Keys tab.")
+            return
+
+        if hasattr(self, "btn_refresh_models"):
+            self.btn_refresh_models.configure(state="disabled", text="...")
+        self.model_combo.configure(values=["Fetching live models..."])
+        self.model_combo.set("Fetching live models...")
+
+        if self.status_callback:
+            self.status_callback(f"Querying available models for {prov}...")
 
         def run():
             fetched = engine.fetch_available_models(prov)
-            self.after(0, lambda: self._apply_fetched_models(fetched))
+            try:
+                self.after(0, lambda: self._apply_fetched_models(prov, fetched))
+            except Exception:
+                pass
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _apply_fetched_models(self, models: List[str]):
-        self.btn_fetch.configure(state="normal", text="Discover")
-        if models:
-            self.model_combo.configure(values=models)
-            self.model_combo.set(models[0])
+    def _apply_fetched_models(self, prov: str, models: List[str]):
+        if hasattr(self, "btn_refresh_models"):
+            self.btn_refresh_models.configure(state="normal", text="↻")
+
+        if self.provider_combo.get() != prov:
+            return
+
+        if not models:
+            self.model_combo.configure(values=["No models found (Check key)"])
+            self.model_combo.set("No models found (Check key)")
             if self.status_callback:
-                self.status_callback(
-                    f"Loaded {len(models)} models for {self.provider_combo.get()}"
-                )
+                self.status_callback(f"Could not load models for {prov}. Check API key.")
+            return
+
+        self.model_combo.configure(values=models)
+        saved_model = cfg.get_setting("active_model", "")
+        if saved_model in models:
+            self.model_combo.set(saved_model)
+        else:
+            self.model_combo.set(models[0])
+            cfg.set_setting("active_model", models[0])
+
+        if self.status_callback:
+            self.status_callback(f"Loaded {len(models)} live available models for {prov}.")
 
     # ===================================================================
     # SYSTEM PROMPT DIALOG
@@ -714,8 +788,7 @@ class ChatTab(ctk.CTkFrame):
                 except Exception:
                     pass
                 self._stream_timer = None
-            self.btn_send.configure(state="normal")
-            self.btn_stop.configure(state="disabled")
+            self._set_action_button_state(False)
 
             self.messages.clear()
             self.current_conversation_id = None
@@ -751,7 +824,7 @@ class ChatTab(ctk.CTkFrame):
     def _stop_generation(self):
         if self.is_generating:
             self.cancel_event.set()
-            self.btn_stop.configure(state="disabled")
+            self.btn_action.configure(state="disabled")
             if self.status_callback:
                 self.status_callback("Stopping generation...")
 
@@ -774,6 +847,14 @@ class ChatTab(ctk.CTkFrame):
 
         provider = self.provider_combo.get()
         model = self.model_combo.get()
+
+        # Check if provider has no key configured or error
+        if any(model.startswith(p) for p in ("No key", "Fetching", "No models", "Loading")):
+            messagebox.showwarning(
+                "Model Unavailable",
+                f"Please enter an API key for {provider} in the Keys tab before sending a message."
+            )
+            return
 
         # Store message with model/provider metadata
         msg_entry: Dict[str, Any] = {
@@ -801,8 +882,7 @@ class ChatTab(ctk.CTkFrame):
 
         self.is_generating = True
         self.cancel_event.clear()
-        self.btn_send.configure(state="disabled")
-        self.btn_stop.configure(state="normal")
+        self._set_action_button_state(True)
         if self.status_callback:
             self.status_callback(f"Thinking with {model} ({provider})...")
 
@@ -918,8 +998,7 @@ class ChatTab(ctk.CTkFrame):
                 pass
             self._stream_timer = None
 
-        self.btn_send.configure(state="normal")
-        self.btn_stop.configure(state="disabled")
+        self._set_action_button_state(False)
 
         # Flush any remaining chunks in the buffer
         remaining = ""
@@ -966,8 +1045,7 @@ class ChatTab(ctk.CTkFrame):
                 pass
             self._stream_timer = None
 
-        self.btn_send.configure(state="normal")
-        self.btn_stop.configure(state="disabled")
+        self._set_action_button_state(False)
         if self.active_assistant_label:
             self.active_assistant_label.configure(
                 text=f"Error: {err_text}",
@@ -1083,22 +1161,51 @@ class ChatTab(ctk.CTkFrame):
             )
             content_lbl.pack(anchor="w", padx=12, pady=(2, 10))
 
-        # Copy button for assistant messages loaded from history
-        if not is_user and text:
+        # Copy & Edit buttons for messages
+        if text:
+            actions_bar = ctk.CTkFrame(msg_frame, fg_color="transparent")
+            actions_bar.pack(anchor="e", padx=12, pady=(0, 6))
+
+            if is_user:
+                # Edit button for user message
+                btn_edit = ctk.CTkButton(
+                    actions_bar,
+                    text="✎",
+                    width=26,
+                    height=22,
+                    font=("Segoe UI Symbol", 11),
+                    fg_color="#F3F4F6",
+                    hover_color="#E5E7EB",
+                    text_color="#374151",
+                    corner_radius=4,
+                    command=lambda t=text: self._edit_sent_message(t),
+                )
+                btn_edit.pack(side="left", padx=2)
+
+            # Copy button for both user and assistant
             copy_btn = ctk.CTkButton(
-                msg_frame,
-                text="Copy",
-                width=50,
+                actions_bar,
+                text="⧉",
+                width=26,
                 height=22,
-                font=theme.FONT_SMALL,
+                font=("Segoe UI Symbol", 11),
                 fg_color="#F3F4F6",
                 hover_color="#E5E7EB",
                 text_color="#374151",
+                corner_radius=4,
                 command=lambda t=text: self._copy_to_clipboard(t),
             )
-            copy_btn.pack(anchor="e", padx=12, pady=(0, 8))
+            copy_btn.pack(side="left", padx=2)
 
         self._scroll_to_bottom()
+
+    def _edit_sent_message(self, text: str):
+        """Load a previously sent user message back into the input box for editing."""
+        self.input_text.delete("1.0", "end")
+        self.input_text.insert("1.0", text)
+        self.input_text.focus_set()
+        if self.status_callback:
+            self.status_callback("Message loaded into input for editing.")
 
     def _append_assistant_placeholder(
         self, provider: str, model: str,
@@ -1135,13 +1242,14 @@ class ChatTab(ctk.CTkFrame):
 
         copy_btn = ctk.CTkButton(
             header,
-            text="Copy",
-            width=50,
+            text="⧉",
+            width=26,
             height=22,
-            font=theme.FONT_SMALL,
+            font=("Segoe UI Symbol", 11),
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
+            corner_radius=4,
             state="disabled",
         )
         copy_btn.pack(side="right")
@@ -1174,8 +1282,7 @@ class ChatTab(ctk.CTkFrame):
             except Exception:
                 pass
             self._stream_timer = None
-        self.btn_send.configure(state="normal")
-        self.btn_stop.configure(state="disabled")
+        self._set_action_button_state(False)
 
         self.messages.clear()
         self.current_conversation_id = None

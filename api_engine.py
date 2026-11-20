@@ -970,7 +970,30 @@ class AIEngine:
         prov_id = prov_info["id"]
         pool = key_pools.get_pool(prov_id)
         api_key = pool.get_active_key().key if pool.get_active_key() else cfg.get_key(prov_id)
-        
+
+        # Free provider does not require key
+        if prov_id == "pollinations":
+            try:
+                resp = self.session.get("https://text.pollinations.ai/models", timeout=8)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    fetched = []
+                    if isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, str) and item:
+                                fetched.append(item)
+                            elif isinstance(item, dict) and item.get("name"):
+                                fetched.append(item["name"])
+                    if fetched:
+                        return sorted(list(dict.fromkeys(fetched)))
+            except Exception:
+                pass
+            return list(prov_info.get("models", []))
+
+        # Other providers require API key
+        if not api_key:
+            return []
+
         if prov_id == "custom":
             cust = cfg.get_custom_endpoint()
             api_key = cust.get("api_key", "")
@@ -978,7 +1001,7 @@ class AIEngine:
         else:
             base_url = prov_info["base_url"].rstrip("/")
 
-        models = list(prov_info.get("models", []))
+        fallback_models = list(prov_info.get("models", []))
         try:
             if prov_info["type"] == "openai_compat":
                 headers = {}
@@ -989,18 +1012,54 @@ class AIEngine:
                     data = resp.json().get("data", [])
                     fetched = [m.get("id") for m in data if m.get("id")]
                     if fetched:
+                        if prov_id == "openai":
+                            # Filter to chat-capable models only
+                            chat_models = [
+                                m for m in fetched
+                                if any(m.startswith(prefix) for prefix in ("gpt-", "o1", "o3", "chatgpt"))
+                                and not any(excl in m for excl in ("realtime", "audio", "transcription", "tts", "embedding", "instruct"))
+                            ]
+                            if chat_models:
+                                return sorted(chat_models)
                         return sorted(fetched)
+                elif resp.status_code in (401, 403):
+                    # Key is invalid or unauthorized
+                    return []
+
             elif prov_info["type"] == "gemini":
                 resp = self.session.get(f"{base_url}/models?key={api_key}", timeout=10)
                 if resp.status_code == 200:
                     data = resp.json().get("models", [])
-                    fetched = [m.get("name", "").replace("models/", "") for m in data if "generateContent" in str(m.get("supportedGenerationMethods", []))]
+                    fetched = [
+                        m.get("name", "").replace("models/", "")
+                        for m in data
+                        if "generateContent" in str(m.get("supportedGenerationMethods", []))
+                    ]
                     if fetched:
                         return sorted(fetched)
+                elif resp.status_code in (400, 401, 403):
+                    return []
+
+            elif prov_info["type"] == "claude":
+                headers = {
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01"
+                }
+                resp = self.session.get("https://api.anthropic.com/v1/models", headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json().get("data", [])
+                    fetched = [m.get("id") for m in data if m.get("id")]
+                    if fetched:
+                        return sorted(fetched)
+                elif resp.status_code in (401, 403):
+                    return []
+                # If /v1/models not available on tier, return verified claude models
+                return fallback_models
+
         except Exception:
             pass
 
-        return models
+        return fallback_models
 
 # Global engine singleton
 engine = AIEngine()
