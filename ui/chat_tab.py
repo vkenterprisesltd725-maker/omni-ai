@@ -75,6 +75,7 @@ class ChatTab(ctk.CTkFrame):
         self.current_conversation_id: Optional[str] = None
         self.current_conversation_title: Optional[str] = None
         self.current_conversation_file: Optional[str] = None
+        self.is_history_visible: bool = False  # Hidden by default; toggled via three-line menu button (☰)
 
         self._build_ui()
         self._update_failover_telemetry()
@@ -110,22 +111,49 @@ class ChatTab(ctk.CTkFrame):
     # -----------------------------------------------------------------
     # History sidebar
     # -----------------------------------------------------------------
+    # History sidebar (Drawer - toggled via three-line menu button ☰)
+    # -----------------------------------------------------------------
     def _build_history_sidebar(self):
         self.history_sidebar = ctk.CTkFrame(
             self.main_hbox,
-            width=200,
+            width=230,
             fg_color="#F7F7F8",
             corner_radius=0,
             border_width=1,
             border_color=theme.COLOR_BORDER,
         )
-        self.history_sidebar.pack(side="left", fill="y")
+        # Note: Do not pack here by default; toggled via three-line menu button (☰)
         self.history_sidebar.pack_propagate(False)
+
+        # Header Row: "Conversations" Title + Close Button
+        header_row = ctk.CTkFrame(self.history_sidebar, fg_color="transparent")
+        header_row.pack(fill="x", padx=10, pady=(10, 4))
+
+        lbl_title = ctk.CTkLabel(
+            header_row,
+            text="Conversations",
+            font=theme.FONT_HEADING,
+            text_color=theme.COLOR_TEXT_MAIN,
+        )
+        lbl_title.pack(side="left")
+
+        btn_close = ctk.CTkButton(
+            header_row,
+            text="✕",
+            width=26,
+            height=26,
+            font=("Segoe UI", 10, "bold"),
+            fg_color="transparent",
+            hover_color="#FEE2E2",
+            text_color=theme.COLOR_TEXT_MUTED,
+            command=self._toggle_history_sidebar,
+        )
+        btn_close.pack(side="right")
 
         # "New Chat" button
         btn_new = ctk.CTkButton(
             self.history_sidebar,
-            text="New Chat",
+            text="+ New Chat",
             font=theme.FONT_BODY_BOLD,
             height=32,
             fg_color=theme.COLOR_ACCENT,
@@ -133,13 +161,13 @@ class ChatTab(ctk.CTkFrame):
             text_color="#FFFFFF",
             command=self._new_chat,
         )
-        btn_new.pack(fill="x", padx=8, pady=(10, 6))
+        btn_new.pack(fill="x", padx=8, pady=(4, 6))
 
         # Section label
         lbl = ctk.CTkLabel(
             self.history_sidebar,
-            text="History",
-            font=theme.FONT_BADGE,
+            text="SAVED SESSIONS",
+            font=("Segoe UI", 8, "bold"),
             text_color=theme.COLOR_TEXT_DIM,
             anchor="w",
         )
@@ -151,6 +179,77 @@ class ChatTab(ctk.CTkFrame):
             fg_color="transparent",
         )
         self.history_list_frame.pack(fill="both", expand=True, padx=0, pady=0)
+
+        # Drawer Bottom: Developer Contact Links
+        drawer_bottom = ctk.CTkFrame(
+            self.history_sidebar,
+            fg_color="#FFFFFF",
+            corner_radius=8,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+        )
+        drawer_bottom.pack(fill="x", side="bottom", padx=8, pady=8)
+
+        lbl_dev_c = ctk.CTkLabel(
+            drawer_bottom,
+            text="DEVELOPER CONTACT",
+            font=("Segoe UI", 8, "bold"),
+            text_color="#9CA3AF",
+            anchor="w",
+        )
+        lbl_dev_c.pack(fill="x", padx=8, pady=(6, 2))
+
+        import webbrowser
+        btn_box = ctk.CTkFrame(drawer_bottom, fg_color="transparent")
+        btn_box.pack(fill="x", padx=6, pady=(0, 6))
+
+        btn_d_git = ctk.CTkButton(
+            btn_box,
+            text="🐙 Git",
+            font=("Segoe UI", 9),
+            height=26,
+            fg_color="#F3F4F6",
+            hover_color="#E5E7EB",
+            text_color=theme.COLOR_TEXT_MAIN,
+            command=lambda: webbrowser.open(cfg.get_setting("developer_github", "https://github.com/vkenterprisesltd725-maker")),
+        )
+        btn_d_git.pack(side="left", fill="x", expand=True, padx=(0, 2))
+
+        btn_d_insta = ctk.CTkButton(
+            btn_box,
+            text="📷 Insta",
+            font=("Segoe UI", 9),
+            height=26,
+            fg_color="#F3F4F6",
+            hover_color="#E5E7EB",
+            text_color=theme.COLOR_TEXT_MAIN,
+            command=lambda: webbrowser.open(cfg.get_setting("developer_instagram", "https://instagram.com/vikaskhatik725")),
+        )
+        btn_d_insta.pack(side="left", fill="x", expand=True, padx=(2, 0))
+
+    def _toggle_history_sidebar(self):
+        """Toggle the conversation history drawer open/close."""
+        if self.is_history_visible:
+            self.history_sidebar.pack_forget()
+            self.is_history_visible = False
+            if hasattr(self, "btn_history_menu"):
+                self.btn_history_menu.configure(
+                    fg_color="#F3F4F6",
+                    text_color="#1F2937",
+                )
+            if self.status_callback:
+                self.status_callback("History collapsed")
+        else:
+            self.history_sidebar.pack(side="left", fill="y", before=self.chat_area)
+            self.is_history_visible = True
+            if hasattr(self, "btn_history_menu"):
+                self.btn_history_menu.configure(
+                    fg_color=theme.COLOR_ACCENT,
+                    text_color="#FFFFFF",
+                )
+            self._refresh_history_list()
+            if self.status_callback:
+                self.status_callback("History opened")
 
     def _refresh_history_list(self):
         """Reload the sidebar list from disk."""
@@ -253,12 +352,27 @@ class ChatTab(ctk.CTkFrame):
         )
         self.top_bar.pack(fill="x", padx=14, pady=(12, 6))
 
+        # Three-line Hamburger menu button (☰) to toggle History drawer
+        self.btn_history_menu = ctk.CTkButton(
+            self.top_bar,
+            text="☰",
+            width=36,
+            height=28,
+            font=("Segoe UI Symbol", 15, "bold"),
+            fg_color="#F3F4F6",
+            hover_color="#E5E7EB",
+            text_color="#1F2937",
+            corner_radius=6,
+            command=self._toggle_history_sidebar,
+        )
+        self.btn_history_menu.grid(row=0, column=0, padx=(10, 4), pady=8, sticky="w")
+
         # Provider selector
         prov_lbl = ctk.CTkLabel(
             self.top_bar, text="Provider:", font=theme.FONT_BODY_BOLD,
             text_color=theme.COLOR_TEXT_MAIN,
         )
-        prov_lbl.grid(row=0, column=0, padx=(14, 4), pady=8, sticky="w")
+        prov_lbl.grid(row=0, column=1, padx=(6, 4), pady=8, sticky="w")
 
         provider_names = list(PROVIDERS.keys())
         default_prov = cfg.get_setting("active_provider", "Pollinations (Free - No Key)")
@@ -274,21 +388,21 @@ class ChatTab(ctk.CTkFrame):
             command=self._on_provider_change,
         )
         self.provider_combo.set(default_prov)
-        self.provider_combo.grid(row=0, column=1, padx=4, pady=8, sticky="w")
+        self.provider_combo.grid(row=0, column=2, padx=4, pady=8, sticky="w")
 
         # Model selector
         mod_lbl = ctk.CTkLabel(
             self.top_bar, text="Model:", font=theme.FONT_BODY_BOLD,
             text_color=theme.COLOR_TEXT_MAIN,
         )
-        mod_lbl.grid(row=0, column=2, padx=(12, 4), pady=8, sticky="w")
+        mod_lbl.grid(row=0, column=3, padx=(10, 4), pady=8, sticky="w")
 
         self.model_combo = ctk.CTkComboBox(
-            self.top_bar, values=["Loading available models..."], width=200,
+            self.top_bar, values=["Loading available models..."], width=190,
             fg_color=theme.COLOR_INPUT, border_color=theme.COLOR_BORDER,
             command=self._on_model_change,
         )
-        self.model_combo.grid(row=0, column=3, padx=4, pady=8, sticky="w")
+        self.model_combo.grid(row=0, column=4, padx=4, pady=8, sticky="w")
 
         # Refresh Live Models button (sleek icon button)
         self.btn_refresh_models = ctk.CTkButton(
@@ -302,7 +416,7 @@ class ChatTab(ctk.CTkFrame):
             text_color="#374151",
             command=self._fetch_models_threaded,
         )
-        self.btn_refresh_models.grid(row=0, column=4, padx=(2, 4), pady=8, sticky="w")
+        self.btn_refresh_models.grid(row=0, column=5, padx=(2, 4), pady=8, sticky="w")
         self.btn_fetch = self.btn_refresh_models
 
         # Temperature
@@ -310,14 +424,14 @@ class ChatTab(ctk.CTkFrame):
             self.top_bar, text="Temp:", font=theme.FONT_SMALL,
             text_color=theme.COLOR_TEXT_MUTED,
         )
-        temp_lbl.grid(row=0, column=5, padx=(12, 2), pady=8, sticky="w")
+        temp_lbl.grid(row=0, column=6, padx=(10, 2), pady=8, sticky="w")
 
         self.temp_slider = ctk.CTkSlider(
-            self.top_bar, from_=0.0, to=1.5, number_of_steps=15, width=80,
+            self.top_bar, from_=0.0, to=1.5, number_of_steps=15, width=70,
             progress_color=theme.COLOR_ACCENT,
         )
         self.temp_slider.set(cfg.get_setting("temperature", 0.7))
-        self.temp_slider.grid(row=0, column=6, padx=2, pady=8, sticky="w")
+        self.temp_slider.grid(row=0, column=7, padx=2, pady=8, sticky="w")
 
         self.temp_val_lbl = ctk.CTkLabel(
             self.top_bar,
@@ -326,7 +440,7 @@ class ChatTab(ctk.CTkFrame):
             width=24,
             text_color=theme.COLOR_TEXT_MUTED,
         )
-        self.temp_val_lbl.grid(row=0, column=7, padx=(2, 6), pady=8, sticky="w")
+        self.temp_val_lbl.grid(row=0, column=8, padx=(2, 6), pady=8, sticky="w")
         self.temp_slider.configure(
             command=lambda v: self.temp_val_lbl.configure(text=f"{float(v):.1f}")
         )
@@ -335,19 +449,19 @@ class ChatTab(ctk.CTkFrame):
         self.btn_sys = ctk.CTkButton(
             self.top_bar,
             text="Persona",
-            width=75,
+            width=70,
             font=theme.FONT_SMALL,
             fg_color="#F3F4F6",
             hover_color="#E5E7EB",
             text_color="#374151",
             command=self._open_system_prompt_dialog,
         )
-        self.btn_sys.grid(row=0, column=8, padx=4, pady=8, sticky="w")
+        self.btn_sys.grid(row=0, column=9, padx=4, pady=8, sticky="w")
 
         # Telemetry pill (right-aligned)
         self.failover_node_frame = ctk.CTkFrame(self.top_bar, fg_color="transparent")
-        self.failover_node_frame.grid(row=0, column=9, padx=(8, 12), pady=8, sticky="e")
-        self.top_bar.grid_columnconfigure(9, weight=1)
+        self.failover_node_frame.grid(row=0, column=10, padx=(8, 12), pady=8, sticky="e")
+        self.top_bar.grid_columnconfigure(10, weight=1)
 
         self.telemetry_pill = ctk.CTkLabel(
             self.failover_node_frame,

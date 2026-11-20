@@ -23,6 +23,7 @@ if sys.stderr is None:
 
 import customtkinter as ctk
 import pyperclip
+import webbrowser
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
@@ -232,15 +233,77 @@ class UniversalAIApp(ctk.CTk):
             btn.grid(row=i, column=0, padx=12, pady=4, sticky="ew")
             self.nav_buttons[tab_id] = btn
 
-        # Sidebar Footer: Developer label
-        self.dev_label = ctk.CTkLabel(
+        # ----------------------------------------------------
+        # UI LEFT BOTTOM: Developer Contact Section
+        # ----------------------------------------------------
+        self.dev_box = ctk.CTkFrame(
             self.sidebar,
-            text="VIKA-BUILDS",
-            font=theme.FONT_SMALL,
-            text_color=theme.COLOR_TEXT_DIM,
-            anchor="w"
+            fg_color="#F9FAFB",
+            corner_radius=8,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
         )
-        self.dev_label.grid(row=8, column=0, padx=24, pady=16, sticky="ew")
+        self.dev_box.grid(row=8, column=0, padx=12, pady=(10, 14), sticky="ew")
+
+        # Developer Header
+        dev_top = ctk.CTkFrame(self.dev_box, fg_color="transparent")
+        dev_top.pack(fill="x", padx=10, pady=(8, 2))
+
+        lbl_dev_badge = ctk.CTkLabel(
+            dev_top,
+            text="DEVELOPER CONTACT",
+            font=("Segoe UI", 8, "bold"),
+            text_color="#9CA3AF",
+            anchor="w",
+        )
+        lbl_dev_badge.pack(side="left")
+
+        lbl_dev_name = ctk.CTkLabel(
+            self.dev_box,
+            text="VIKA-BUILDS",
+            font=theme.FONT_BODY_BOLD,
+            text_color=theme.COLOR_TEXT_MAIN,
+            anchor="w",
+        )
+        lbl_dev_name.pack(fill="x", padx=10, pady=(0, 6))
+
+        # Links Frame
+        links_frame = ctk.CTkFrame(self.dev_box, fg_color="transparent")
+        links_frame.pack(fill="x", padx=8, pady=(0, 8))
+
+        # GitHub Button
+        self.btn_dev_git = ctk.CTkButton(
+            links_frame,
+            text="🐙 GitHub",
+            font=theme.FONT_SMALL,
+            height=28,
+            fg_color="#FFFFFF",
+            hover_color=theme.COLOR_CARD_HOVER,
+            text_color=theme.COLOR_TEXT_MAIN,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+            corner_radius=6,
+            command=self._open_dev_github,
+        )
+        self.btn_dev_git.pack(fill="x", pady=2)
+        self.btn_dev_git.bind("<Button-3>", lambda e: self._edit_dev_link("git"))
+
+        # Instagram Button
+        self.btn_dev_insta = ctk.CTkButton(
+            links_frame,
+            text="📷 Instagram",
+            font=theme.FONT_SMALL,
+            height=28,
+            fg_color="#FFFFFF",
+            hover_color=theme.COLOR_CARD_HOVER,
+            text_color=theme.COLOR_TEXT_MAIN,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+            corner_radius=6,
+            command=self._open_dev_instagram,
+        )
+        self.btn_dev_insta.pack(fill="x", pady=2)
+        self.btn_dev_insta.bind("<Button-3>", lambda e: self._edit_dev_link("insta"))
 
         # CONTENT FRAME
         self.content_area = ctk.CTkFrame(self.body_container, fg_color="transparent")
@@ -330,11 +393,39 @@ class UniversalAIApp(ctk.CTk):
             self.set_status("Master API Key copied to clipboard.")
             messagebox.showinfo("Copied", f"Master API Key copied:\n{key}")
 
+    def _open_dev_github(self):
+        url = cfg.get_setting("developer_github", "https://github.com/vkenterprisesltd725-maker")
+        webbrowser.open(url)
+        self.set_status(f"Opening Developer GitHub: {url}")
+
+    def _open_dev_instagram(self):
+        url = cfg.get_setting("developer_instagram", "https://instagram.com/vikaskhatik725")
+        webbrowser.open(url)
+        self.set_status(f"Opening Developer Instagram: {url}")
+
+    def _edit_dev_link(self, link_type: str):
+        dialog_title = "Edit GitHub URL" if link_type == "git" else "Edit Instagram URL"
+        current_val = cfg.get_setting(
+            "developer_github" if link_type == "git" else "developer_instagram",
+            "https://github.com/vkenterprisesltd725-maker" if link_type == "git" else "https://instagram.com/vikaskhatik725"
+        )
+        dialog = ctk.CTkInputDialog(text=f"Enter {dialog_title}:", title=dialog_title)
+        new_val = dialog.get_input()
+        if new_val and new_val.strip():
+            if link_type == "git":
+                cfg.set_setting("developer_github", new_val.strip())
+            else:
+                cfg.set_setting("developer_instagram", new_val.strip())
+            self.set_status(f"Updated developer {link_type} link!")
+
     def _show_about_dev(self):
         messagebox.showinfo(
             "About Developer",
             "OmniAI Studio — Portable Gateway Edition\n\n"
             "Engineered by: VIKA-BUILDS\n"
+            "Developer: Vikas Kumar Khatik\n"
+            "GitHub: https://github.com/vkenterprisesltd725-maker\n"
+            "Instagram: https://instagram.com/vikaskhatik725\n\n"
             "Architecture: 100% Portable, Offline Key Security, Multi-Key Failover Pools\n"
             "Open-source & Free for Developers."
         )

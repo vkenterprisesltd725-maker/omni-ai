@@ -95,7 +95,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "video_settings": {
         "provider": "Replicate (Minimax / Luma Dream Machine)",
         "aspect_ratio": "16:9 Landscape"
-    }
+    },
+    "developer_github": "https://github.com/vkenterprisesltd725-maker",
+    "developer_instagram": "https://instagram.com/vikaskhatik725"
 }
 
 _SALT = b"OmniAIPortableStudio2026"
