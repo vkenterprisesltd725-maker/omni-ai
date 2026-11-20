@@ -38,6 +38,7 @@ from ui.video_tab import VideoTab
 from ui.keys_tab import KeysTab
 from ui.docs_tab import DocsTab
 from ui.guide_tab import GuideTab
+from ui.report_dialog import open_report_dialog
 
 
 class UniversalAIApp(ctk.CTk):
@@ -232,6 +233,23 @@ class UniversalAIApp(ctk.CTk):
         )
         self.theme_toggle_btn.pack(side="left", padx=4)
 
+        # Feedback & Bug Report Header Button
+        self.btn_report_header = ctk.CTkButton(
+            right_box,
+            text="💡 Report",
+            font=theme.FONT_SMALL,
+            width=76,
+            height=26,
+            corner_radius=13,
+            fg_color=theme.COLOR_CARD_HOVER,
+            hover_color=theme.COLOR_BORDER,
+            text_color=theme.COLOR_TEXT_MAIN,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+            command=self._open_report_dialog,
+        )
+        self.btn_report_header.pack(side="left", padx=4)
+
         # ----------------------------------------------------
         # 2. MAIN FULL-WIDTH WORKSPACE CONTAINER
         # ----------------------------------------------------
@@ -333,6 +351,24 @@ class UniversalAIApp(ctk.CTk):
             )
             btn.pack(fill="x", padx=12, pady=3)
             self.nav_buttons[tab_id] = btn
+
+        # Report & Feature Request button in Drawer
+        div_rep = ctk.CTkFrame(self.nav_drawer, height=1, fg_color=theme.COLOR_BORDER)
+        div_rep.pack(fill="x", padx=14, pady=(8, 6))
+
+        self.btn_drawer_report = ctk.CTkButton(
+            self.nav_drawer,
+            text="💡  Report Bug / Feature",
+            font=theme.FONT_BODY,
+            height=38,
+            corner_radius=8,
+            fg_color="transparent",
+            text_color=theme.COLOR_TEXT_MUTED,
+            anchor="w",
+            hover_color=theme.COLOR_CARD_HOVER,
+            command=self._open_report_dialog,
+        )
+        self.btn_drawer_report.pack(fill="x", padx=12, pady=2)
 
         # Spacer to push developer contact to bottom
         spacer = ctk.CTkFrame(self.nav_drawer, fg_color="transparent")
@@ -580,6 +616,10 @@ class UniversalAIApp(ctk.CTk):
             else:
                 cfg.set_setting("developer_instagram", new_val.strip())
             self.set_status(f"Updated developer {link_type} link!")
+
+    def _open_report_dialog(self):
+        self._close_nav_drawer()
+        open_report_dialog(self)
 
     def _show_about_dev(self):
         messagebox.showinfo(
