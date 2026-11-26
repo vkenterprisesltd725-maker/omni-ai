@@ -74,6 +74,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "gemini": [],
         "claude": [],
         "groq": [],
+        "cerebras": [],
+        "github_models": [],
         "deepseek": [],
         "openrouter": [],
         "mistral": [],

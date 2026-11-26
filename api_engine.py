@@ -24,6 +24,55 @@ os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
 PROVIDERS = {
+    "Smart Cascade Router (FreeLLMAPI)": {
+        "id": "smart_router",
+        "type": "smart_router",
+        "base_url": "",
+        "models": [
+            "⚡ free-fast",
+            "🧠 free-reasoner",
+            "💻 free-coder",
+            "🦙 free-llama-3.3-70b",
+            "✨ free-gpt-4o-mini"
+        ],
+        "key_hint": "Zero config needed - uses any active key (Groq, Cerebras, GitHub, Gemini) or free fallback",
+        "has_chat": True,
+        "has_image": False,
+        "has_video": False
+    },
+    "Cerebras (Free & 2,000+ tok/s)": {
+        "id": "cerebras",
+        "type": "openai_compat",
+        "base_url": "https://api.cerebras.ai/v1",
+        "models": [
+            "llama-3.3-70b",
+            "llama3.1-8b",
+            "deepseek-r1-distill-llama-70b"
+        ],
+        "key_hint": "csk-... (1M Free tokens/day from cloud.cerebras.ai)",
+        "has_chat": True,
+        "has_image": False,
+        "has_video": False
+    },
+    "GitHub Models (Free AI Token)": {
+        "id": "github_models",
+        "type": "openai_compat",
+        "base_url": "https://models.github.ai/inference",
+        "models": [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "o1-mini",
+            "o3-mini",
+            "Meta-Llama-3.3-70B-Instruct",
+            "Mistral-large-2411",
+            "Phi-4",
+            "Codestral-2501"
+        ],
+        "key_hint": "ghp_... or github_pat_... (Supports multiple keys)",
+        "has_chat": True,
+        "has_image": False,
+        "has_video": False
+    },
     "OpenAI (Official)": {
         "id": "openai",
         "type": "openai_compat",
@@ -143,6 +192,75 @@ VIDEO_PROVIDERS = [
     "Pollinations Video (Free AI Generator)"
 ]
 
+# -----------------------------------------------------------------------------
+# FREELLMAPI SMART CASCADE CHAINS & CROSS-PROVIDER FALLBACKS
+# -----------------------------------------------------------------------------
+CASCADE_CHAINS: Dict[str, List[Tuple[str, str]]] = {
+    "⚡ free-fast": [
+        ("groq", "llama-3.3-70b-versatile"),
+        ("cerebras", "llama-3.3-70b"),
+        ("groq", "llama-3.1-8b-instant"),
+        ("cerebras", "llama3.1-8b"),
+        ("gemini", "gemini-2.0-flash"),
+        ("openrouter", "google/gemini-2.0-flash-exp:free"),
+        ("pollinations", "openai")
+    ],
+    "🧠 free-reasoner": [
+        ("gemini", "gemini-2.0-flash-thinking-exp"),
+        ("cerebras", "deepseek-r1-distill-llama-70b"),
+        ("deepseek", "deepseek-reasoner"),
+        ("openrouter", "deepseek/deepseek-r1"),
+        ("github_models", "o3-mini"),
+        ("pollinations", "deepseek")
+    ],
+    "💻 free-coder": [
+        ("github_models", "Codestral-2501"),
+        ("mistral", "codestral-latest"),
+        ("groq", "qwen/qwen3.8-27b"),
+        ("github_models", "Mistral-large-2411"),
+        ("openrouter", "mistralai/mistral-large-2411"),
+        ("pollinations", "mistral")
+    ],
+    "🦙 free-llama-3.3-70b": [
+        ("groq", "llama-3.3-70b-versatile"),
+        ("cerebras", "llama-3.3-70b"),
+        ("github_models", "Meta-Llama-3.3-70B-Instruct"),
+        ("openrouter", "meta-llama/llama-3.3-70b-instruct"),
+        ("pollinations", "openai")
+    ],
+    "✨ free-gpt-4o-mini": [
+        ("github_models", "gpt-4o-mini"),
+        ("openrouter", "openai/gpt-4o-mini"),
+        ("pollinations", "openai")
+    ]
+}
+
+PROVIDER_MODEL_FALLBACKS: Dict[str, List[Tuple[str, str]]] = {
+    "llama-3.3-70b": [
+        ("groq", "llama-3.3-70b-versatile"),
+        ("cerebras", "llama-3.3-70b"),
+        ("github_models", "Meta-Llama-3.3-70B-Instruct"),
+        ("openrouter", "meta-llama/llama-3.3-70b-instruct"),
+        ("pollinations", "openai")
+    ],
+    "llama3.1-8b": [
+        ("groq", "llama-3.1-8b-instant"),
+        ("cerebras", "llama3.1-8b"),
+        ("pollinations", "openai")
+    ],
+    "gpt-4o-mini": [
+        ("github_models", "gpt-4o-mini"),
+        ("openrouter", "openai/gpt-4o-mini"),
+        ("pollinations", "openai")
+    ],
+    "deepseek-r1": [
+        ("cerebras", "deepseek-r1-distill-llama-70b"),
+        ("deepseek", "deepseek-reasoner"),
+        ("openrouter", "deepseek/deepseek-r1"),
+        ("pollinations", "deepseek")
+    ]
+}
+
 def encode_image_to_base64(image_path: str) -> Tuple[str, str]:
     ext = os.path.splitext(image_path)[1].lower()
     mime = "image/jpeg"
@@ -212,7 +330,19 @@ def is_model_free(provider_str: str, model_id: str, openrouter_free_set: Optiona
     pid = str(provider_str).lower()
     mid = str(model_id).lower().strip()
 
-    if mid.startswith("[free]"):
+    if mid.startswith("[free]") or any(mid.startswith(p) for p in ["⚡ free", "🧠 free", "💻 free", "🦙 free", "✨ free"]):
+        return True
+
+    # Smart Cascade Router (FreeLLMAPI): all models are virtual free cascade routes
+    if "smart_router" in pid or "smart cascade" in pid or "freellmapi" in pid:
+        return True
+
+    # Cerebras: 100% free developer tier for all hosted models
+    if "cerebras" in pid:
+        return True
+
+    # GitHub Models: 100% free with Personal Access Token
+    if "github" in pid:
         return True
 
     # Groq: 100% free developer tier for ALL models
@@ -235,15 +365,12 @@ def is_model_free(provider_str: str, model_id: str, openrouter_free_set: Optiona
     # Google Gemini: standard AI Studio free tier models
     if "gemini" in pid or "google" in pid:
         free_gemini = [
-            "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro",
+            "gemini-2.0-flash", "gemini-2.0-flash-thinking-exp", "gemini-2.0-pro-exp",
+            "gemini-1.5-flash", "gemini-1.5-pro",
             "gemini-exp", "learnlm"
         ]
         if any(fg in mid for fg in free_gemini):
             return True
-
-    # Cerebras: free tier models
-    if "cerebras" in pid:
-        return True
 
     return False
 
@@ -321,10 +448,25 @@ class AIEngine:
         callback_err: Optional[Callable[[str], None]] = None,
         cancel_event = None
     ):
-        """Streaming chat completions with automatic key failover."""
+        """Streaming chat completions with automatic key failover and cross-provider cascading."""
         prov_info = PROVIDERS.get(provider_name, PROVIDERS["Custom OpenAI Endpoint"])
         prov_type = prov_info["type"]
         prov_id = prov_info["id"]
+
+        # Smart Cascade Router or virtual cascade model target
+        if prov_id == "smart_router" or model in CASCADE_CHAINS:
+            return self._stream_cascade(
+                model=model,
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                image_path=image_path,
+                callback_chunk=callback_chunk,
+                callback_done=callback_done,
+                callback_err=callback_err,
+                cancel_event=cancel_event
+            )
 
         if prov_id == "custom":
             cust = cfg.get_custom_endpoint()
@@ -444,12 +586,216 @@ class AIEngine:
                     time.sleep(0.5)
                     continue
                 else:
+                    # If all keys for this provider are exhausted on 429, check cross-provider cascade
+                    if pool.is_rate_limit_error(status_code, last_error):
+                        for fb_key, fb_chain in PROVIDER_MODEL_FALLBACKS.items():
+                            if fb_key in model.lower():
+                                remaining_targets = [t for t in fb_chain if t[0] != prov_id]
+                                if remaining_targets:
+                                    key_pools.emit_event("cascade", prov_id, {
+                                        "active_target": f"Cascade Failover from {provider_name}",
+                                        "status": "Failover",
+                                        "reason": f"All keys rate-limited (429): {last_error[:40]}"
+                                    })
+                                    return self._stream_cascade_chain(
+                                        chain=remaining_targets,
+                                        messages=messages,
+                                        system_prompt=system_prompt,
+                                        temperature=temperature,
+                                        max_tokens=max_tokens,
+                                        image_path=image_path,
+                                        callback_chunk=callback_chunk,
+                                        callback_done=callback_done,
+                                        callback_err=callback_err,
+                                        cancel_event=cancel_event
+                                    )
                     break
 
         if cancel_event and cancel_event.is_set():
             last_error = "[Generation Stopped by User]"
         if callback_err:
             callback_err(last_error)
+
+    # -------------------------------------------------------------------------
+    # SMART CASCADE ROUTER EXECUTION (FREELLMAPI NATIVE ENGINE)
+    # -------------------------------------------------------------------------
+    def _stream_cascade(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        system_prompt: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        image_path: Optional[str] = None,
+        callback_chunk: Optional[Callable[[str], None]] = None,
+        callback_done: Optional[Callable[[str], None]] = None,
+        callback_err: Optional[Callable[[str], None]] = None,
+        cancel_event = None
+    ):
+        clean_model = model.strip()
+        chain = CASCADE_CHAINS.get(clean_model)
+        if not chain:
+            for k, v in CASCADE_CHAINS.items():
+                if clean_model in k or k in clean_model:
+                    chain = v
+                    break
+        if not chain:
+            chain = CASCADE_CHAINS.get("⚡ free-fast", [("pollinations", "openai")])
+
+        return self._stream_cascade_chain(
+            chain=chain,
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            image_path=image_path,
+            callback_chunk=callback_chunk,
+            callback_done=callback_done,
+            callback_err=callback_err,
+            cancel_event=cancel_event
+        )
+
+    def _stream_cascade_chain(
+        self,
+        chain: List[Tuple[str, str]],
+        messages: List[Dict[str, Any]],
+        system_prompt: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        image_path: Optional[str] = None,
+        callback_chunk: Optional[Callable[[str], None]] = None,
+        callback_done: Optional[Callable[[str], None]] = None,
+        callback_err: Optional[Callable[[str], None]] = None,
+        cancel_event = None
+    ):
+        last_error = ""
+        for idx, (target_prov_id, target_model) in enumerate(chain):
+            if cancel_event and cancel_event.is_set():
+                break
+
+            target_prov_name = None
+            target_prov_info = None
+            for p_name, p_data in PROVIDERS.items():
+                if p_data.get("id") == target_prov_id:
+                    target_prov_name = p_name
+                    target_prov_info = p_data
+                    break
+
+            if not target_prov_name or not target_prov_info:
+                continue
+
+            # Verify available keys
+            if target_prov_id == "pollinations":
+                keys = [""]
+            elif target_prov_id == "custom":
+                cust = cfg.get_custom_endpoint()
+                keys = [cust.get("api_key", "")]
+            else:
+                pool = key_pools.get_pool(target_prov_id)
+                keys = [k.key for k in pool.keys if k.key]
+                if not keys:
+                    keys = cfg.get_keys(target_prov_id)
+                if not keys:
+                    # Skip provider because user has no configured keys for it
+                    continue
+                if pool.is_all_cooling_down() and target_prov_id != "pollinations":
+                    # All keys cooling down
+                    continue
+
+            key_pools.emit_event("cascade", "smart_router", {
+                "active_target": f"{target_prov_name} ({target_model})",
+                "attempt": idx + 1,
+                "status": "Streaming",
+                "provider": target_prov_id,
+                "model": target_model
+            })
+
+            prov_type = target_prov_info["type"]
+            base_url = target_prov_info["base_url"].rstrip("/") if target_prov_info.get("base_url") else ""
+            pool = key_pools.get_pool(target_prov_id) if target_prov_id not in ["pollinations", "custom"] else None
+            active_item = pool.get_active_key() if pool else None
+            api_key = active_item.key if active_item else (keys[0] if keys else "")
+
+            try:
+                full_text = ""
+                if prov_type == "openai_compat":
+                    full_text = self._stream_openai_compat(
+                        base_url=base_url,
+                        api_key=api_key,
+                        model=target_model,
+                        messages=messages,
+                        system_prompt=system_prompt,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        image_path=image_path,
+                        callback_chunk=callback_chunk,
+                        cancel_event=cancel_event,
+                        prov_id=target_prov_id,
+                        key_item=active_item
+                    )
+                elif prov_type == "gemini":
+                    full_text = self._stream_gemini(
+                        base_url=base_url,
+                        api_key=api_key,
+                        model=target_model,
+                        messages=messages,
+                        system_prompt=system_prompt,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        image_path=image_path,
+                        callback_chunk=callback_chunk,
+                        cancel_event=cancel_event,
+                        prov_id=target_prov_id,
+                        key_item=active_item
+                    )
+                elif prov_type == "claude":
+                    full_text = self._stream_claude(
+                        base_url=base_url,
+                        api_key=api_key,
+                        model=target_model,
+                        messages=messages,
+                        system_prompt=system_prompt,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        image_path=image_path,
+                        callback_chunk=callback_chunk,
+                        cancel_event=cancel_event,
+                        prov_id=target_prov_id,
+                        key_item=active_item
+                    )
+                elif prov_type == "pollinations":
+                    full_text = self._stream_pollinations(
+                        model=target_model,
+                        messages=messages,
+                        system_prompt=system_prompt,
+                        callback_chunk=callback_chunk,
+                        cancel_event=cancel_event
+                    )
+
+                if active_item and pool:
+                    pool.mark_success(active_item.key)
+
+                if callback_done:
+                    callback_done(full_text)
+                return
+
+            except Exception as e:
+                last_error = str(e)
+                status_code = getattr(e, "status_code", 429 if "429" in last_error else 500)
+                if pool and active_item and pool.is_rate_limit_error(status_code, last_error):
+                    pool.rotate_to_next(active_item.key, cooldown_secs=60.0, error_msg=last_error)
+                key_pools.emit_event("cascade", "smart_router", {
+                    "active_target": f"Cascade Failover from {target_prov_name}",
+                    "attempt": idx + 1,
+                    "status": "Failover",
+                    "reason": last_error[:60] if last_error else "Rate limit / quota error"
+                })
+                continue
+
+        if cancel_event and cancel_event.is_set():
+            last_error = "[Generation Stopped by User]"
+        if callback_err:
+            callback_err(last_error or "Cascade chain failed across all available providers.")
 
     # -------------------------------------------------------------------------
     # SYNCHRONOUS CHAT COMPLETION (FOR CUSTOM API GATEWAY SERVER)
@@ -1118,12 +1464,37 @@ class AIEngine:
         else:
             base_url = prov_info["base_url"].rstrip("/")
 
-        if prov_id not in ["pollinations", "custom"] and not api_key:
+        if prov_id == "smart_router":
+            return True, 1, "Smart Router Ready (Zero Config)"
+
+        if prov_id not in ["pollinations", "custom", "smart_router"] and not api_key:
             return False, 0, "No API key entered."
 
         t0 = time.time()
         try:
-            if prov_type == "openai_compat":
+            if prov_id == "cerebras":
+                headers = {"Authorization": f"Bearer {api_key}"}
+                resp = self.session.get("https://api.cerebras.ai/v1/models", headers=headers, timeout=10)
+                latency = int((time.time() - t0) * 1000)
+                if resp.status_code == 200:
+                    return True, latency, f"Cerebras Connected! ({latency}ms)"
+                elif resp.status_code in [401, 403]:
+                    return False, latency, "Invalid Cerebras Key"
+                else:
+                    return False, latency, f"HTTP {resp.status_code}"
+
+            elif prov_id == "github_models":
+                headers = {"Authorization": f"Bearer {api_key}"}
+                resp = self.session.get(f"{base_url}/models", headers=headers, timeout=10)
+                latency = int((time.time() - t0) * 1000)
+                if resp.status_code in (200, 204):
+                    return True, latency, f"GitHub Connected! ({latency}ms)"
+                elif resp.status_code in (401, 403):
+                    return False, latency, "Invalid GitHub Token"
+                else:
+                    return False, latency, f"HTTP {resp.status_code}"
+
+            elif prov_type == "openai_compat":
                 headers = {}
                 if api_key:
                     headers["Authorization"] = f"Bearer {api_key}"
@@ -1176,7 +1547,9 @@ class AIEngine:
         api_key = pool.get_active_key().key if pool.get_active_key() else cfg.get_key(prov_id)
 
         # Free provider does not require key
-        if prov_id == "pollinations":
+        if prov_id in ["pollinations", "smart_router"]:
+            if prov_id == "smart_router":
+                return list(prov_info.get("models", []))
             try:
                 resp = self.session.get("https://text.pollinations.ai/models", timeout=8)
                 if resp.status_code == 200:
@@ -1301,6 +1674,29 @@ class AIEngine:
         # Retrieve cached real-time rate limit headers
         cached = dict(self.latest_provider_limits.get(prov_id, {}))
         res["limits"] = cached
+
+        if prov_id == "smart_router":
+            res["is_free"] = True
+            res["info"] = "Virtual Multi-Provider Smart Cascade Router (FreeLLMAPI Native). Intelligently routes and auto-cascades between Groq, Cerebras, Google Gemini, GitHub Models, and Pollinations."
+            res["status"] = "Active (Smart Cascade Router)"
+            res["limits"] = {"routing": "Auto-Cascade Failover", "tier": "100% Free"}
+            return res
+
+        if prov_id == "cerebras":
+            res["is_free"] = True
+            res["info"] = "Cerebras Free Developer Tier: 1,000,000 tokens/day free, 30 RPM, 60,000 TPM at 2,000+ tokens/sec."
+            res["status"] = "Active (Free Tier)"
+            if not cached:
+                res["limits"] = {"req_limit": "30 RPM", "tok_limit": "60,000 TPM", "daily_limit": "1M tokens/day"}
+            return res
+
+        if prov_id == "github_models":
+            res["is_free"] = True
+            res["info"] = "GitHub Models Free Tier: Free access to GPT-4o, Llama 3.3 70B, Mistral Large, o1/o3-mini via GitHub Personal Access Token."
+            res["status"] = "Active (Free Tier)"
+            if not cached:
+                res["limits"] = {"req_limit": "15 RPM", "daily_limit": "150 RPD"}
+            return res
 
         if prov_id == "pollinations":
             res["is_free"] = True

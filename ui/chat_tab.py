@@ -750,6 +750,14 @@ class ChatTab(ctk.CTkFrame):
         active = stats["active_keys"]
         cooldown = stats["cooldown_keys"]
 
+        if prov_id == "smart_router":
+            self.telemetry_pill.configure(
+                text="🔀 Smart Cascade (Free)",
+                fg_color="transparent",
+                text_color="#059669",
+            )
+            return
+
         if total == 0:
             if prov_id == "pollinations":
                 self.telemetry_pill.configure(
@@ -792,7 +800,13 @@ class ChatTab(ctk.CTkFrame):
         pool = key_pools.get_pool(prov_id)
         limits = pool.get_latest_rate_limits() or engine.latest_provider_limits.get(prov_id, {})
 
-        if prov_id == "pollinations":
+        if prov_id == "smart_router":
+            self.btn_limits_pill.configure(text="⚡ Auto-Cascade")
+        elif prov_id == "cerebras" and not limits:
+            self.btn_limits_pill.configure(text="⚡ 1M Free/Day")
+        elif prov_id == "github_models" and not limits:
+            self.btn_limits_pill.configure(text="⚡ Free PAT")
+        elif prov_id == "pollinations":
             self.btn_limits_pill.configure(text="⚡ Free Mode")
         elif prov_id == "groq" and not limits:
             self.btn_limits_pill.configure(text="⚡ 30 RPM Free")
@@ -817,7 +831,21 @@ class ChatTab(ctk.CTkFrame):
 
     def _on_key_failover_event(self, event: Dict[str, Any]):
         evt_type = event.get("type")
-        if evt_type in ("failover", "keys_updated"):
+        if evt_type == "cascade":
+            active_target = event.get("active_target", "")
+            status_text = event.get("status", "")
+            reason = event.get("reason", "")
+            if active_target:
+                self.after(0, lambda: self.telemetry_pill.configure(
+                    text=f"🔀 {active_target[:26]}",
+                    text_color="#059669" if status_text == "Streaming" else "#D97706"
+                ))
+            if self.status_callback:
+                if status_text == "Failover":
+                    self.after(0, lambda: self.status_callback(f"Cascade: {reason} -> Switching provider..."))
+                else:
+                    self.after(0, lambda: self.status_callback(f"Cascade: Active on {active_target}"))
+        elif evt_type in ("failover", "keys_updated"):
             self.after(0, self._update_failover_telemetry)
             if evt_type == "keys_updated":
                 self.after(0, self._fetch_models_threaded)
@@ -873,7 +901,7 @@ class ChatTab(ctk.CTkFrame):
         # Check if keys are entered for this provider
         pool = key_pools.get_pool(prov_id)
         has_key = bool(pool.get_active_key() or cfg.get_key(prov_id))
-        is_free = (prov_id == "pollinations")
+        is_free = (prov_id in ["pollinations", "smart_router"])
 
         if not has_key and not is_free:
             self.model_combo.configure(values=["No key entered (Add in Keys tab)"])

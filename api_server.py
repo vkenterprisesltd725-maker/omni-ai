@@ -90,15 +90,36 @@ async def verify_master_key(request: Request):
 def resolve_model_and_provider(requested_model: str) -> Tuple[str, str]:
     """
     Resolves requested model string to (provider_name, clean_model_name).
-    Supports prefixes like 'openai/gpt-4o' or direct model names 'gemini-1.5-flash'.
+    Supports FreeLLMAPI smart router models (e.g. 'free-fast', 'free-reasoner'),
+    prefixes like 'openai/gpt-4o', 'cerebras/llama-3.3-70b', or direct model names.
     """
     m = requested_model.lower().strip()
+
+    # FreeLLMAPI Virtual Smart Cascade Router aliases
+    if any(k in m for k in ["smart", "free-fast", "free-reasoner", "free-coder", "free-llama", "free-gpt"]):
+        if "fast" in m:
+            return "Smart Cascade Router (FreeLLMAPI)", "⚡ free-fast"
+        elif "reason" in m:
+            return "Smart Cascade Router (FreeLLMAPI)", "🧠 free-reasoner"
+        elif "code" in m:
+            return "Smart Cascade Router (FreeLLMAPI)", "💻 free-coder"
+        elif "llama" in m:
+            return "Smart Cascade Router (FreeLLMAPI)", "🦙 free-llama-3.3-70b"
+        elif "gpt" in m:
+            return "Smart Cascade Router (FreeLLMAPI)", "✨ free-gpt-4o-mini"
+        return "Smart Cascade Router (FreeLLMAPI)", "⚡ free-fast"
 
     # Prefix checks
     if "/" in requested_model:
         prefix, clean = requested_model.split("/", 1)
         prefix = prefix.lower().strip()
-        if prefix in ["openai"]:
+        if prefix in ["smart", "cascade", "freellmapi"]:
+            return "Smart Cascade Router (FreeLLMAPI)", clean
+        elif prefix in ["cerebras"]:
+            return "Cerebras (Free & 2,000+ tok/s)", clean
+        elif prefix in ["github", "github_models", "gh"]:
+            return "GitHub Models (Free AI Token)", clean
+        elif prefix in ["openai"]:
             return "OpenAI (Official)", clean
         elif prefix in ["gemini", "google"]:
             return "Google Gemini", clean
@@ -126,6 +147,10 @@ def resolve_model_and_provider(requested_model: str) -> Tuple[str, str]:
         return "Google Gemini", requested_model
     elif "claude" in m:
         return "Anthropic Claude", requested_model
+    elif "cerebras" in m or (any(k in m for k in ["llama-3.3-70b", "llama3.1-8b"]) and cfg.get_keys("cerebras")):
+        return "Cerebras (Free & 2,000+ tok/s)", requested_model
+    elif "github" in m:
+        return "GitHub Models (Free AI Token)", requested_model
     elif any(k in m for k in ["gpt-oss", "qwen", "llama", "mixtral", "gemma"]) and cfg.get_keys("groq"):
         return "Groq (Free & Ultra-Fast)", requested_model
     elif "deepseek" in m:
@@ -138,7 +163,7 @@ def resolve_model_and_provider(requested_model: str) -> Tuple[str, str]:
         return "OpenRouter (300+ Models)", requested_model
 
     # Fallback to active provider or Custom Endpoint
-    active_prov = cfg.get_setting("active_provider", "Pollinations (Free - No Key)")
+    active_prov = cfg.get_setting("active_provider", "Smart Cascade Router (FreeLLMAPI)")
     return active_prov, requested_model
 
 # -----------------------------------------------------------------------------
