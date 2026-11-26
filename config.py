@@ -43,6 +43,10 @@ def get_app_data_dir() -> tuple:
     data_dir = os.path.join(app_data, "OmniAI_Studio")
     return data_dir, False
 
+APP_VERSION = "2.3.0"
+APP_NAME = "OmniAI Studio"
+GITHUB_REPO = "vkenterprisesltd725-maker/omni-ai"
+
 DATA_DIR, IS_PORTABLE = get_app_data_dir()
 BASE_DIR = DATA_DIR  # Backwards compatibility
 CONFIG_FILE = os.path.join(DATA_DIR, "portable_config.json" if IS_PORTABLE else "config.json")
@@ -98,6 +102,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "provider": "Replicate (Minimax / Luma Dream Machine)",
         "aspect_ratio": "16:9 Landscape"
     },
+    "auto_check_updates": True,
+    "skipped_update_version": "",
     "developer_github": "https://github.com/vkenterprisesltd725-maker",
     "developer_instagram": "https://instagram.com/vikaskhatik725"
 }

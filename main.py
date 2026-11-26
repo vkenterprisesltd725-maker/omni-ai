@@ -29,7 +29,7 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
-from config import cfg, OUTPUTS_IMAGE_DIR, OUTPUTS_VIDEO_DIR, IS_PORTABLE, DATA_DIR
+from config import cfg, OUTPUTS_IMAGE_DIR, OUTPUTS_VIDEO_DIR, IS_PORTABLE, DATA_DIR, APP_VERSION
 from api_server import server_manager
 import ui.theme as theme
 from ui.chat_tab import ChatTab
@@ -39,6 +39,7 @@ from ui.keys_tab import KeysTab
 from ui.docs_tab import DocsTab
 from ui.guide_tab import GuideTab
 from ui.report_dialog import open_report_dialog
+from ui.updater import check_for_updates_interactive
 
 
 class UniversalAIApp(ctk.CTk):
@@ -158,13 +159,17 @@ class UniversalAIApp(ctk.CTk):
         )
         lbl_logo.pack(side="left")
 
-        lbl_ver = ctk.CTkLabel(
+        lbl_ver = ctk.CTkButton(
             brand_left,
-            text=" v2.2 PORTABLE " if IS_PORTABLE else " v2.2 ",
+            text=f" v{APP_VERSION} PORTABLE " if IS_PORTABLE else f" v{APP_VERSION} ",
             font=theme.FONT_BADGE,
             fg_color=theme.COLOR_CARD_HOVER,
+            hover_color=theme.COLOR_BORDER,
             text_color=theme.COLOR_TEXT_MUTED,
             corner_radius=6,
+            height=22,
+            border_width=0,
+            command=self._manual_check_for_updates,
         )
         lbl_ver.pack(side="left", padx=10)
 
@@ -370,6 +375,20 @@ class UniversalAIApp(ctk.CTk):
         )
         self.btn_drawer_report.pack(fill="x", padx=12, pady=2)
 
+        self.btn_drawer_update = ctk.CTkButton(
+            self.nav_drawer,
+            text="🔄  Check for Updates",
+            font=theme.FONT_BODY,
+            height=38,
+            corner_radius=8,
+            fg_color="transparent",
+            text_color=theme.COLOR_TEXT_MUTED,
+            anchor="w",
+            hover_color=theme.COLOR_CARD_HOVER,
+            command=self._manual_check_for_updates,
+        )
+        self.btn_drawer_update.pack(fill="x", padx=12, pady=2)
+
         # Spacer to push developer contact to bottom
         spacer = ctk.CTkFrame(self.nav_drawer, fg_color="transparent")
         spacer.pack(fill="both", expand=True)
@@ -475,6 +494,20 @@ class UniversalAIApp(ctk.CTk):
             command=self._open_data_folder,
         )
         self.watermark_lbl.pack(side="right", padx=16)
+
+        # Background Auto-Check for Updates (2s after startup)
+        if cfg.get_setting("auto_check_updates", True):
+            self.after(2000, self._auto_check_for_updates)
+
+    # -----------------------------------------------------------------
+    # Automatic & Manual Update Checks
+    # -----------------------------------------------------------------
+    def _auto_check_for_updates(self):
+        check_for_updates_interactive(self, is_manual=False)
+
+    def _manual_check_for_updates(self):
+        self._close_nav_drawer()
+        check_for_updates_interactive(self, is_manual=True)
 
     # -----------------------------------------------------------------
     # Navigation Drawer Animation & Logic (Claude / Linear Style)
