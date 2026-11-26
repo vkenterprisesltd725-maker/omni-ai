@@ -57,6 +57,8 @@ def build_main_app() -> str:
         "--hidden-import=uvicorn.protocols.http.auto",
         "--hidden-import=uvicorn.protocols.websockets.auto",
         "--hidden-import=uvicorn.lifespan.on",
+        "--hidden-import=ui.google_auth",
+        "--hidden-import=ui.free_api_hub",
         f"--paths={BASE_DIR}",
         MAIN_PY
     ]

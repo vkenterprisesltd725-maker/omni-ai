@@ -74,11 +74,27 @@ def get_special_folder(folder_name: str) -> Optional[str]:
     return None
 
 
+def run_hidden_command(cmd, check=False) -> subprocess.CompletedProcess:
+    """Run command with zero console window or screen flash on Windows."""
+    creationflags = 0x08000000  # CREATE_NO_WINDOW
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0  # SW_HIDE
+    return subprocess.run(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creationflags,
+        startupinfo=startupinfo,
+        check=check
+    )
+
+
 def kill_running_processes():
-    """Terminate running instances to prevent file lock errors."""
+    """Terminate running instances to prevent file lock errors with zero CMD flashes."""
     for proc_name in [APP_EXE_NAME, "UniversalAI_Studio.exe", "OmniAI_Studio"]:
         try:
-            subprocess.run(["taskkill", "/f", "/im", proc_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            run_hidden_command(["taskkill", "/f", "/im", proc_name])
         except Exception:
             pass
     time.sleep(0.5)
@@ -140,7 +156,7 @@ oLink.Description = "{description}"
             f.write(vbs_content)
             vbs_path = f.name
 
-        subprocess.run(["cscript", "//nologo", vbs_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        run_hidden_command(["cscript", "//nologo", vbs_path], check=True)
         if os.path.exists(vbs_path):
             os.remove(vbs_path)
         return True
@@ -366,7 +382,16 @@ def perform_uninstall(target_dir: str, remove_data: bool = False, status_callbac
             f.write(f'rd /s /q "{target_dir}" >nul 2>&1\n')
             f.write('del "%~f0"\n')
 
-        subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=0x00000008 | 0x08000000)
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0
+        subprocess.Popen(
+            ["cmd.exe", "/c", bat_path],
+            creationflags=0x00000008 | 0x08000000,
+            startupinfo=si,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
 
         if status_callback:
             status_callback("OmniAI Studio has been successfully uninstalled.", 1.0)
@@ -527,9 +552,13 @@ class InstallerGUI(ctk.CTk):
         if self.installed_exe:
             if self.chk_launch.get():
                 try:
-                    subprocess.Popen([self.installed_exe], cwd=os.path.dirname(self.installed_exe))
-                except Exception as e:
-                    print(f"Error launching: {e}")
+                    os.startfile(self.installed_exe)
+                except Exception:
+                    try:
+                        creationflags = 0x08000000
+                        subprocess.Popen([self.installed_exe], cwd=os.path.dirname(self.installed_exe), creationflags=creationflags)
+                    except Exception as e:
+                        print(f"Error launching: {e}")
             self.destroy()
             return
 

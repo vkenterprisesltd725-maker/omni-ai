@@ -40,6 +40,7 @@ from ui.docs_tab import DocsTab
 from ui.guide_tab import GuideTab
 from ui.report_dialog import open_report_dialog
 from ui.updater import check_for_updates_interactive
+from ui.google_auth import google_auth_mgr, show_google_auth_dialog
 
 
 class UniversalAIApp(ctk.CTk):
@@ -92,6 +93,10 @@ class UniversalAIApp(ctk.CTk):
 
         # Keyboard shortcuts: Escape closes navigation drawer
         self.bind("<Escape>", lambda e: self._close_nav_drawer())
+
+        # Register Google Auth State listener and initialize UI state
+        google_auth_mgr.add_listener(self._update_google_auth_ui)
+        self._update_google_auth_ui()
 
         # Start API Gateway in background if enabled
         s_cfg = cfg.get_server_config()
@@ -255,6 +260,22 @@ class UniversalAIApp(ctk.CTk):
         )
         self.btn_report_header.pack(side="left", padx=4)
 
+        # Google Sign-In Header Button
+        self.btn_google_auth = ctk.CTkButton(
+            right_box,
+            text="🔴 Sign in with Google",
+            font=theme.FONT_SMALL,
+            height=26,
+            corner_radius=13,
+            fg_color=theme.COLOR_CARD_HOVER,
+            hover_color=theme.COLOR_BORDER,
+            text_color=theme.COLOR_TEXT_MAIN,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+            command=self._open_google_auth_dialog,
+        )
+        self.btn_google_auth.pack(side="left", padx=4)
+
         # ----------------------------------------------------
         # 2. MAIN FULL-WIDTH WORKSPACE CONTAINER
         # ----------------------------------------------------
@@ -329,6 +350,37 @@ class UniversalAIApp(ctk.CTk):
         # Divider
         div = ctk.CTkFrame(self.nav_drawer, height=1, fg_color=theme.COLOR_BORDER)
         div.pack(fill="x", padx=12, pady=(0, 10))
+
+        # Drawer User Profile Card
+        self.drawer_profile_card = ctk.CTkFrame(
+            self.nav_drawer,
+            fg_color=theme.COLOR_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+        )
+        self.drawer_profile_card.pack(fill="x", padx=12, pady=(0, 10))
+
+        prof_inner = ctk.CTkFrame(self.drawer_profile_card, fg_color="transparent")
+        prof_inner.pack(fill="x", padx=8, pady=8)
+
+        av_box = ctk.CTkFrame(prof_inner, width=32, height=32, corner_radius=16, fg_color="#18181B")
+        av_box.pack(side="left")
+        av_box.pack_propagate(False)
+        self.drawer_profile_avatar = ctk.CTkLabel(av_box, text="G", font=("Segoe UI", 11, "bold"), text_color="#FFFFFF")
+        self.drawer_profile_avatar.pack(expand=True)
+
+        prof_texts = ctk.CTkFrame(prof_inner, fg_color="transparent")
+        prof_texts.pack(side="left", padx=(8, 0), fill="x", expand=True)
+
+        self.drawer_profile_name = ctk.CTkLabel(prof_texts, text="Sign in with Google", font=theme.FONT_BODY_BOLD, text_color=theme.COLOR_TEXT_MAIN, anchor="w")
+        self.drawer_profile_name.pack(anchor="w")
+
+        self.drawer_profile_status = ctk.CTkLabel(prof_texts, text="Click to connect", font=theme.FONT_SMALL, text_color=theme.COLOR_TEXT_MUTED, anchor="w")
+        self.drawer_profile_status.pack(anchor="w")
+
+        for w in [self.drawer_profile_card, prof_inner, prof_texts, self.drawer_profile_name, self.drawer_profile_status]:
+            w.bind("<Button-1>", lambda e: self._open_google_auth_dialog())
 
         # Drawer Navigation Items
         self.nav_buttons = {}
@@ -653,6 +705,34 @@ class UniversalAIApp(ctk.CTk):
     def _open_report_dialog(self):
         self._close_nav_drawer()
         open_report_dialog(self)
+
+    def _open_google_auth_dialog(self):
+        self._close_nav_drawer()
+        show_google_auth_dialog(self, on_success=self._update_google_auth_ui)
+
+    def _update_google_auth_ui(self, profile=None):
+        if not hasattr(self, "btn_google_auth"):
+            return
+        if google_auth_mgr.is_signed_in():
+            name = google_auth_mgr.get_display_name()
+            prof = google_auth_mgr.get_profile()
+            self.btn_google_auth.configure(
+                text=f"🟢 Google: {name}",
+                text_color=theme.COLOR_SUCCESS,
+            )
+            if hasattr(self, "drawer_profile_name"):
+                self.drawer_profile_name.configure(text=prof.get("name", name))
+                self.drawer_profile_avatar.configure(text=google_auth_mgr.get_initials())
+                self.drawer_profile_status.configure(text="● Connected to Google", text_color=theme.COLOR_SUCCESS)
+        else:
+            self.btn_google_auth.configure(
+                text="🔴 Sign in with Google",
+                text_color=theme.COLOR_TEXT_MUTED,
+            )
+            if hasattr(self, "drawer_profile_name"):
+                self.drawer_profile_name.configure(text="Sign in with Google")
+                self.drawer_profile_avatar.configure(text="G")
+                self.drawer_profile_status.configure(text="Click to connect", text_color=theme.COLOR_TEXT_MUTED)
 
     def _show_about_dev(self):
         messagebox.showinfo(

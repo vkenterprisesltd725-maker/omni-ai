@@ -16,6 +16,7 @@ from config import cfg, CONFIG_FILE, parse_keys_string
 from api_engine import engine, PROVIDERS, is_model_free
 from key_pool import key_pools
 import ui.theme as theme
+from ui.free_api_hub import show_free_api_hub, auto_detect_and_paste_key
 
 KEY_ITEMS = [
     ("openai", "OpenAI (GPT-4o / DALL-E)", "sk-proj-... or sk-..."),
@@ -82,6 +83,42 @@ class KeysTab(ctk.CTkFrame):
             justify="left",
         )
         b_desc.pack(anchor="w", padx=14, pady=(0, 8))
+
+        # 1-Click Free API Hub & Auto-Paste Action Bar
+        hub_bar = ctk.CTkFrame(
+            self.scroll_frame,
+            fg_color=theme.COLOR_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=theme.COLOR_BORDER,
+        )
+        hub_bar.pack(fill="x", padx=8, pady=(0, 8))
+
+        btn_hub = ctk.CTkButton(
+            hub_bar,
+            text="⚡  1-Click Free API Hub (Gemini, Groq, Cerebras...)",
+            font=theme.FONT_BODY_BOLD,
+            height=32,
+            fg_color=theme.COLOR_ACCENT,
+            hover_color=theme.COLOR_ACCENT_HOVER,
+            text_color="#FFFFFF",
+            corner_radius=6,
+            command=self._open_free_api_hub,
+        )
+        btn_hub.pack(side="left", padx=10, pady=8)
+
+        btn_auto_paste = ctk.CTkButton(
+            hub_bar,
+            text="📋  Auto-Detect & Paste from Clipboard",
+            font=theme.FONT_BODY_BOLD,
+            height=32,
+            fg_color="#F3F4F6",
+            hover_color="#E5E7EB",
+            text_color="#18181B",
+            corner_radius=6,
+            command=self._auto_detect_clipboard_key,
+        )
+        btn_auto_paste.pack(side="left", padx=4, pady=8)
 
         # Compact Provider Key Cards
         for key_id, label_text, hint in KEY_ITEMS:
@@ -514,6 +551,23 @@ class KeysTab(ctk.CTkFrame):
             badge.configure(text=f"🟢 {msg}", text_color=theme.COLOR_SUCCESS)
         else:
             badge.configure(text=f"🔴 {msg[:25]}", text_color=theme.COLOR_ERROR)
+
+    def _open_free_api_hub(self):
+        show_free_api_hub(self, on_keys_updated=self._on_key_auto_pasted)
+
+    def _auto_detect_clipboard_key(self):
+        success, msg = auto_detect_and_paste_key(self, on_saved=self._on_key_auto_pasted)
+        if success:
+            messagebox.showinfo("Key Added", msg, parent=self)
+        else:
+            messagebox.showwarning("Clipboard Detection", msg, parent=self)
+
+    def _on_key_auto_pasted(self, provider: str, keys_str: str):
+        if provider in self.key_entries:
+            self.key_entries[provider].delete(0, "end")
+            self.key_entries[provider].insert(0, keys_str)
+            self._on_keys_text_changed(provider)
+            self._test_provider_key(provider)
 
     def _export_config(self):
         path = filedialog.asksaveasfilename(
